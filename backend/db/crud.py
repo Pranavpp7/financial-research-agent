@@ -111,6 +111,9 @@ def save_earning(db: Session, company_id: int, data: dict) -> Earning:
         existing.eps_estimate = data.get("eps_estimate", existing.eps_estimate)
         existing.eps_actual = data.get("eps_actual", existing.eps_actual)
         existing.surprise_pct = data.get("surprise_pct", existing.surprise_pct)
+        existing.revenue = data.get("revenue", existing.revenue)
+        existing.net_income = data.get("net_income", existing.net_income)
+        existing.operating_margin = data.get("operating_margin", existing.operating_margin)
         existing.updated_at = datetime.utcnow()
         db.commit()
         db.refresh(existing)
@@ -124,6 +127,9 @@ def save_earning(db: Session, company_id: int, data: dict) -> Earning:
         eps_estimate=data.get("eps_estimate"),
         eps_actual=data.get("eps_actual"),
         surprise_pct=data.get("surprise_pct"),
+        revenue=data.get("revenue"),
+        net_income=data.get("net_income"),
+        operating_margin=data.get("operating_margin"),
     )
     db.add(earning)
     db.commit()

@@ -13,7 +13,8 @@ from backend.ingestion.edgar_client import get_company_info, get_recent_filings
 from backend.ingestion.yfinance_client import (
     get_company_overview,
     get_earnings_history,
-    get_price_history
+    get_price_history,
+    get_key_financial_ratios,
 )
 from backend.ingestion.news_client import get_company_news
 
@@ -94,6 +95,7 @@ def run_ingestion_pipeline(ticker: str) -> dict:
         "ticker": ticker,
         "company_id": None,
         "earnings_saved": 0,
+        "ratios_matched": 0,
         "filings_saved": 0,
         "articles_saved": 0,
         "errors": []
@@ -126,6 +128,15 @@ def run_ingestion_pipeline(ticker: str) -> dict:
 
         earnings_history = get_earnings_history(ticker)
 
+        # ── STEP 2b: Fetch quarterly financial ratios ──────
+        print("Step 2b: Fetching quarterly financial ratios...")
+
+        financial_ratios = get_key_financial_ratios(ticker)
+        ratios_by_quarter = {
+            r["quarter"]: r for r in financial_ratios if r.get("quarter")
+        }
+        print(f"Fetched ratios for {len(ratios_by_quarter)} quarters")
+
         for earning in earnings_history:
             date_str = earning.get("date", "")
             quarter = date_to_quarter(date_str)
@@ -145,10 +156,17 @@ def run_ingestion_pipeline(ticker: str) -> dict:
                 "surprise_pct": safe_float(earning.get("surprise_pct")),
             }
 
+            matching_ratio = ratios_by_quarter.get(quarter)
+            if matching_ratio:
+                earning_data["revenue"] = safe_float(matching_ratio.get("revenue"))
+                earning_data["net_income"] = safe_float(matching_ratio.get("net_income"))
+                earning_data["operating_margin"] = safe_float(matching_ratio.get("operating_margin"))
+                results["ratios_matched"] += 1
+
             save_earning(db, company.id, earning_data)
             results["earnings_saved"] += 1
 
-        print(f"Saved {results['earnings_saved']} earnings records\n")
+        print(f"Saved {results['earnings_saved']} earnings records ({results['ratios_matched']} enriched with ratios)\n")
 
         # ── STEP 3: Fetch and save SEC filings ──────────────
         print("Step 3: Fetching SEC filings...")
@@ -199,6 +217,7 @@ def run_ingestion_pipeline(ticker: str) -> dict:
     print(f"Pipeline complete for {ticker}")
     print(f"  Company ID:      {results['company_id']}")
     print(f"  Earnings saved:  {results['earnings_saved']}")
+    print(f"  Ratios matched:  {results['ratios_matched']}")
     print(f"  Filings saved:   {results['filings_saved']}")
     print(f"  Articles saved:  {results['articles_saved']}")
     if results["errors"]:

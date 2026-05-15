@@ -103,6 +103,88 @@ def get_price_history(ticker: str, period: str = "1y") -> dict:
         return {}
 
 
+def safe_float(value):
+    """Convert numpy floats or any numeric type to plain Python float."""
+    try:
+        if value is None or str(value) == "nan":
+            return None
+        return float(value)
+    except:
+        return None
+
+
+def _lookup(df, label: str, col):
+    """Get df.loc[label, col] safely; return None if df, label, or col is missing."""
+    if df is None or df.empty:
+        return None
+    if label not in df.index or col not in df.columns:
+        return None
+    return safe_float(df.loc[label, col])
+
+
+def _ratio(numerator, denominator):
+    """Safe division with None propagation."""
+    if numerator is None or denominator is None or denominator == 0:
+        return None
+    return numerator / denominator
+
+
+def get_key_financial_ratios(ticker: str) -> list:
+    """
+    Extract key financial metrics + derived ratios for the last 4 quarters.
+    Returns a list of dicts, most recent quarter first.
+    """
+    try:
+        financials = get_quarterly_financials(ticker)
+        income = financials.get("income_statement")
+        balance = financials.get("balance_sheet")
+        cashflow = financials.get("cashflow")
+
+        if income is None or income.empty:
+            return []
+
+        results = []
+        for col in list(income.columns)[:4]:
+            quarter = f"{col.year}-Q{(col.month - 1) // 3 + 1}"
+
+            revenue = _lookup(income, "Total Revenue", col)
+            gross_profit = _lookup(income, "Gross Profit", col)
+            operating_income = _lookup(income, "Operating Income", col)
+            net_income = _lookup(income, "Net Income", col)
+
+            total_assets = _lookup(balance, "Total Assets", col)
+            total_debt = _lookup(balance, "Total Debt", col)
+            if total_debt is None:
+                total_debt = _lookup(balance, "Long Term Debt", col)
+            cash = _lookup(balance, "Cash And Cash Equivalents", col)
+
+            operating_cashflow = _lookup(cashflow, "Operating Cash Flow", col)
+            capital_expenditure = _lookup(cashflow, "Capital Expenditure", col)
+
+            results.append({
+                "quarter": quarter,
+                "revenue": revenue,
+                "gross_profit": gross_profit,
+                "operating_income": operating_income,
+                "net_income": net_income,
+                "total_assets": total_assets,
+                "total_debt": total_debt,
+                "cash": cash,
+                "operating_cashflow": operating_cashflow,
+                "capital_expenditure": capital_expenditure,
+                "gross_margin": _ratio(gross_profit, revenue),
+                "operating_margin": _ratio(operating_income, revenue),
+                "debt_to_assets": _ratio(total_debt, total_assets),
+                "cash_flow_ratio": _ratio(operating_cashflow, net_income),
+            })
+
+        return results
+
+    except Exception as e:
+        print(f"Error fetching financial ratios for {ticker}: {e}")
+        return []
+
+
 # Quick test when running this file directly
 if __name__ == "__main__":
     ticker = "AAPL"
@@ -122,3 +204,18 @@ if __name__ == "__main__":
     earnings = get_earnings_history(ticker)
     for e in earnings[:4]:
         print(f"  {e['date']} | estimate: {e['eps_estimate']} | actual: {e['eps_actual']} | surprise: {e['surprise_pct']}%")
+
+    print("\n--- Key Financial Ratios (last 4 quarters) ---")
+    ratios = get_key_financial_ratios(ticker)
+    print(f"Quarters returned: {len(ratios)}")
+    for r in ratios:
+        print(f"\n  Quarter: {r['quarter']}")
+        for k, v in r.items():
+            if k == "quarter":
+                continue
+            if v is None:
+                print(f"    {k:22s} None")
+            elif k in ("gross_margin", "operating_margin", "debt_to_assets", "cash_flow_ratio"):
+                print(f"    {k:22s} {v:.4f}")
+            else:
+                print(f"    {k:22s} {v:,.0f}")
