@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\psrrk\\\\Music\\\\financial-research-agent\" -Exclude \".venv\" -Force)",
+      "Bash(Select-Object -ExpandProperty Name)",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\psrrk\\\\Music\\\\financial-research-agent\\\\backend\" -Recurse -File | Select-Object -ExpandProperty FullName | ForEach-Object { $_.Replace\\(\"C:\\\\Users\\\\psrrk\\\\Music\\\\financial-research-agent\\\\\", \"\"\\) })",
+      "Read(//c/Users/psrrk/.claude/projects/c--Users-psrrk-Music-financial-research-agent/memory/**)"
+    ]
+  }
+}

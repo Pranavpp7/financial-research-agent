@@ -208,5 +208,46 @@ def run_ingestion_pipeline(ticker: str) -> dict:
     return results
 
 
+def run_batch_ingestion(tickers: list) -> dict:
+    """
+    Run the ingestion pipeline for multiple tickers.
+    A failure on one ticker does not stop the rest.
+    """
+    succeeded = []
+    failed = []
+
+    for ticker in tickers:
+        try:
+            result = run_ingestion_pipeline(ticker)
+            if result.get("errors"):
+                failed.append((ticker, "; ".join(result["errors"])))
+            else:
+                succeeded.append(ticker)
+        except Exception as e:
+            failed.append((ticker, str(e)))
+            print(f"Pipeline failed for {ticker}: {e}")
+
+    print(f"\n{'='*50}")
+    print(f"Batch ingestion summary")
+    print(f"{'='*50}")
+    print(f"Total:     {len(tickers)}")
+    print(f"Succeeded: {len(succeeded)} -> {succeeded}")
+    print(f"Failed:    {len(failed)}")
+    for ticker, err in failed:
+        print(f"  {ticker}: {err}")
+    print(f"{'='*50}\n")
+
+    return {"succeeded": succeeded, "failed": failed}
+
+
 if __name__ == "__main__":
-    result = run_ingestion_pipeline("AAPL")
+    run_batch_ingestion([
+        "NVDA", "META", "BRK-B", "JPM", "V",
+        "JNJ", "WMT", "PG", "MA", "HD",
+        "BAC", "XOM", "CVX", "ABBV", "MRK",
+        "LLY", "PEP", "KO", "AVGO", "COST",
+        "TMO", "MCD", "ACN", "DHR", "NEE",
+        "TXN", "PM", "UNH", "RTX", "QCOM",
+        "IBM", "GE", "CAT", "SPGI", "BLK",
+        "INTU", "ISRG", "AMAT", "ADP", "MDLZ"
+    ])
