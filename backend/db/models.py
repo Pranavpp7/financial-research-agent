@@ -4,7 +4,6 @@ from sqlalchemy import (
     DateTime, ForeignKey, UniqueConstraint, JSON
 )
 from sqlalchemy.orm import declarative_base, relationship
-from pgvector.sqlalchemy import Vector
 
 Base = declarative_base()
 
@@ -70,7 +69,7 @@ class FilingChunk(Base):
     filing_id = Column(Integer, ForeignKey("filings.id"), nullable=False)
     chunk_text = Column(Text, nullable=False)
     chunk_index = Column(Integer)         # position in the filing
-    embedding = Column(Vector(1024))      # BAAI/bge-large-en-v1.5 dim, pgvector
+    embedding = Column(JSON)             # 1024-dim vector (stored as JSON for now)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     filing = relationship("Filing", back_populates="chunks")

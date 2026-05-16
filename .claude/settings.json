@@ -4,17 +4,7 @@
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\psrrk\\\\Music\\\\financial-research-agent\" -Exclude \".venv\" -Force)",
       "Bash(Select-Object -ExpandProperty Name)",
       "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\psrrk\\\\Music\\\\financial-research-agent\\\\backend\" -Recurse -File | Select-Object -ExpandProperty FullName | ForEach-Object { $_.Replace\\(\"C:\\\\Users\\\\psrrk\\\\Music\\\\financial-research-agent\\\\\", \"\"\\) })",
-      "Read(//c/Users/psrrk/.claude/projects/c--Users-psrrk-Music-financial-research-agent/memory/**)",
-      "Bash(uv add *)",
-      "Bash(docker exec *)",
-      "Bash(uv run *)",
-      "Bash(curl -s -A \"financial-research-agent pranavposina11@gmail.com\" \"https://www.sec.gov/Archives/edgar/data/320193/000032019326000013/index.json\")",
-      "Bash(python -c \"import json, sys; d=json.load\\(sys.stdin\\); items=d.get\\('directory', {}\\).get\\('item', []\\); print\\('\\\\n'.join\\(f\\\\\"{i.get\\('name'\\)}\\\\\\\\t{i.get\\('size'\\)}\\\\\" for i in items if i.get\\('name',''\\).lower\\(\\).endswith\\(\\('.htm','.html'\\)\\)\\)\\)\")",
-      "Bash(npm --version)",
-      "Bash(npm create *)",
-      "Bash(npm install *)",
-      "Bash(npx tailwindcss *)",
-      "Bash(npx tsc *)"
+      "Read(//c/Users/psrrk/.claude/projects/c--Users-psrrk-Music-financial-research-agent/memory/**)"
     ]
   }
 }
