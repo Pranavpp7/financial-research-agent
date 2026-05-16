@@ -1,0 +1,67 @@
+@import "tailwindcss";
+
+/*
+  Tailwind v4 design tokens. Most of the palette in the spec maps 1:1 to
+  default tokens (indigo-500=#6366f1, cyan-400=#22d3ee, emerald-500=#10b981,
+  red-500=#ef4444, slate-100=#f1f5f9, slate-500=#64748b), so we only add
+  what's missing: the dark surface colors and the Inter font.
+*/
+@theme {
+  --color-bg-base: #0a0a0f;
+  --color-bg-card: #111118;
+  --color-border-edge: #1e1e2e;
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+html, body, #root {
+  margin: 0;
+  min-height: 100vh;
+  background-color: var(--color-bg-base);
+  color: #f1f5f9;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Subtle dot-grid background that sits behind everything. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-image: radial-gradient(
+    circle at 1px 1px,
+    rgba(99, 102, 241, 0.08) 1px,
+    transparent 0
+  );
+  background-size: 28px 28px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Glass surface used by cards. */
+.glass {
+  background: rgba(17, 17, 24, 0.7);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+}
+
+/* Blinking cursor for the typewriter loading state. */
+@keyframes caret-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+.caret {
+  display: inline-block;
+  width: 0.6ch;
+  margin-left: 2px;
+  animation: caret-blink 1s steps(1) infinite;
+}
+
+/* Custom scrollbar in the dark theme. */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: #1e1e2e;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover { background: #2a2a3e; }
