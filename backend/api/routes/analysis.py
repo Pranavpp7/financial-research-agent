@@ -10,7 +10,7 @@ from backend.api.schemas.responses import (
     TaskStatusResponse,
 )
 from backend.db.crud import get_company, get_latest_report
-from backend.db.models import Company, MLPrediction, Report
+from backend.db.models import Company, MLPrediction, Report, ReportCitation
 from backend.db.session import SessionLocal
 from backend.tasks.analysis_tasks import run_analysis_task
 from backend.tasks.celery_app import celery_app
@@ -31,6 +31,23 @@ _STATE_MAP = {
 
 
 def _build_report_response(report: Report, company: Company) -> ReportResponse:
+    # key_findings live in report_citations (one row per finding), not on
+    # the report row itself -- pull them back in insertion order.
+    db = SessionLocal()
+    try:
+        findings = [
+            c.claim_text
+            for c in (
+                db.query(ReportCitation)
+                .filter(ReportCitation.report_id == report.id)
+                .order_by(ReportCitation.id.asc())
+                .all()
+            )
+            if c.claim_text
+        ]
+    finally:
+        db.close()
+
     return ReportResponse(
         ticker=company.ticker,
         company_name=company.name,
@@ -39,6 +56,9 @@ def _build_report_response(report: Report, company: Company) -> ReportResponse:
         bear_case=report.bear_case,
         risk_level=report.risk_level,
         confidence_score=report.confidence_score,
+        data_quality=report.data_quality,
+        analyst_notes=report.analyst_notes,
+        key_findings=findings,
         sources=report.sources or [],
     )
 

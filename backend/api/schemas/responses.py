@@ -18,6 +18,9 @@ class ReportResponse(BaseModel):
     bear_case: str | None = None
     risk_level: str | None = None
     confidence_score: float | None = None
+    data_quality: float | None = None
+    analyst_notes: str | None = None
+    key_findings: list | None = None
     sources: list | None = None
 
 

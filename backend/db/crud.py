@@ -1,3 +1,4 @@
+import logging
 import os
 from datetime import datetime
 from sqlalchemy.orm import Session
@@ -7,6 +8,8 @@ from backend.db.models import (
     NewsArticle, MLPrediction, Report,
     ReportCitation, AgentRun, EvalScore
 )
+
+logger = logging.getLogger(__name__)
 
 
 # ─── COMPANY ────────────────────────────────────────────────
@@ -166,8 +169,14 @@ def save_news_article(db: Session, company_id: int, data: dict) -> NewsArticle:
             published_at = datetime.fromisoformat(
                 data["published_at"].replace("Z", "+00:00")
             )
-        except:
-            pass
+        except Exception:
+            # FIXED: was `except: pass` which silently dropped the timestamp.
+            # Now scoped + logged; published_at stays None but the bad value
+            # is visible at debug level.
+            logger.debug(
+                "could not parse published_at %r", data.get("published_at"),
+                exc_info=True,
+            )
 
     article = NewsArticle(
         company_id=company_id,
@@ -231,6 +240,8 @@ def save_report(db: Session, company_id: int, data: dict) -> Report:
         risk_level=data.get("risk_level"),
         overall_sentiment=data.get("overall_sentiment"),
         confidence_score=data.get("confidence_score"),
+        data_quality=data.get("data_quality"),
+        analyst_notes=data.get("analyst_notes"),
         sources=data.get("sources", [])
     )
     db.add(report)

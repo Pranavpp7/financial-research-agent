@@ -44,6 +44,9 @@ export interface Report {
   bear_case: string | null;
   risk_level: "low" | "medium" | "high" | null;
   confidence_score: number | null;
+  data_quality: number | null;
+  analyst_notes: string | null;
+  key_findings: string[] | null;
   sources: unknown[] | null;
 }
 

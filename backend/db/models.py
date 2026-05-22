@@ -167,6 +167,8 @@ class Report(Base):
     risk_level = Column(String(20))       # 'low', 'medium', 'high'
     overall_sentiment = Column(String(20))
     confidence_score = Column(Float)
+    data_quality = Column(Float)          # 0.0-1.0, freshness/completeness of inputs
+    analyst_notes = Column(Text)          # caveats: data gaps, approximations
     sources = Column(JSON)                # list of source references
 
     company = relationship("Company", back_populates="reports")
@@ -223,8 +225,10 @@ class EvalScore(Base):
     id = Column(Integer, primary_key=True)
     report_id = Column(Integer, ForeignKey("reports.id"), nullable=False)
     faithfulness = Column(Float)          # did agent make things up?
-    relevancy = Column(Float)             # did it answer what was asked?
+    relevancy = Column(Float)             # legacy alias of answer_relevancy
+    answer_relevancy = Column(Float)      # Ragas answer_relevancy metric
     context_precision = Column(Float)     # did it use the right sources?
+    context_recall = Column(Float)        # needs ground_truth; null otherwise
     ragas_score = Column(Float)           # overall score
     evaluated_at = Column(DateTime, default=datetime.utcnow)
 

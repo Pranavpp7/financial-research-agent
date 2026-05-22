@@ -20,9 +20,13 @@ Cover:
   magnitude rising, falling, or steady? Note any consecutive-beat streaks.
 - Revenue trend: direction across the quarters where revenue is available.
 - ML signal: what the earnings_surprise_predictor says about next quarter
-  and how confident it is. Mention the top SHAP drivers if shown.
+  and how confident it is. Mention the top SHAP drivers if shown. If the
+  input contains no SHAP values (or says they are unavailable), state
+  explicitly "SHAP values not available" rather than omitting the point.
 - Bull points (3-5 short bullets): reasons the earnings picture is strong.
 - Bear points (3-5 short bullets): reasons the earnings picture is weak.
+- Data completeness: list every quarter in the input whose revenue is
+  null/missing. If all quarters have revenue, say "all quarters complete".
 
 Output format (plain text, sectioned, no markdown):
 SURPRISE TREND: ...
@@ -32,6 +36,7 @@ BULL POINTS:
 - ...
 BEAR POINTS:
 - ...
+DATA COMPLETENESS: ...
 """
 
 
@@ -42,6 +47,10 @@ You will receive a small number of filing chunks retrieved by semantic
 search for the user's question, plus the question itself. Each chunk has
 a reference tag like [AAPL 10-Q chunk #41]. Do NOT assume context beyond
 the chunks shown. Cite chunks by their reference tag for every claim.
+
+If fewer than 3 chunks are provided, begin your response with a single
+line "Limited filing context — only N chunks retrieved" (substitute the
+actual count for N) before the sections below.
 
 Cover:
 - Material risk factors disclosed in the chunks.
@@ -97,7 +106,10 @@ You will receive ML model outputs:
 
 Cover:
 - Beneish read: what the M-Score and classification imply about accounting
-  quality. Flag any ratios that look like neutral defaults.
+  quality. For EACH of the 8 ratios, if its value is exactly a neutral
+  default (exactly 0, exactly 1, or a suspiciously round number such as
+  0.02), append the marker "[likely default]" right after that ratio so
+  the reader knows it carries no real signal.
 - Anomaly read: what the detector flagged (if anything) and which
   features drove the score.
 - Overall risk level: LOW, MEDIUM, or HIGH, with specific evidence.
@@ -118,12 +130,31 @@ SEC filing, news sentiment, risk). Combine them into a structured report.
 
 Rules:
 - Use ONLY information present in the provided analyses. Do NOT invent.
-- bull_case: 3-5 sentences, the strongest reasons to be positive.
-- bear_case: 3-5 sentences, the strongest reasons to be negative.
-- risk_level: "low", "medium", or "high". Pull from the risk analysis if
-  present; otherwise infer from the others and explain in the bear_case.
+- bull_case: 3-5 sentences, the strongest reasons to be positive. EVERY
+  sentence MUST end with a parenthetical source tag identifying which
+  analysis it came from, e.g. "(source: earnings analysis)" or
+  "(source: SEC chunk #41)" or "(source: news sentiment)". No sentence
+  may be left without a source tag.
+- bear_case: 3-5 sentences, the strongest reasons to be negative. Apply
+  the SAME per-sentence source-tag requirement as bull_case.
+- risk_level: "low", "medium", or "high". If a RISK ANALYSIS block is
+  present, you MUST copy its "RISK LEVEL:" line verbatim (lower-cased) --
+  do NOT override or re-derive it. ONLY infer the risk level from the
+  other analyses when no risk analysis is present, and in that case
+  explain the inference in the bear_case.
 - confidence_score: 0.0 to 1.0 -- your honest confidence given how thin
   or rich the inputs are. Few analyses or sparse data => lower confidence.
+- data_quality: 0.0 to 1.0 -- how complete and fresh the INPUT data was,
+  independent of your conclusions. Lower it for: missing analyses (fewer
+  than 4 specialist blocks), sparse or stale earnings, no SEC chunks
+  retrieved, ML predictions flagged as old, or values noted as
+  approximations / defaults. 1.0 means all four analyses present with
+  rich, fresh data; near 0.0 means almost nothing usable.
+- analyst_notes: 1-2 sentences flagging data gaps, approximated values,
+  or low-confidence signals the user should know about (e.g. "Beneish
+  ratios use neutral defaults; treat the M-Score as a rough heuristic."
+  or "No SEC filing context was retrieved, so the filing view is absent.").
+  If the data is fully complete and fresh, say so briefly.
 - key_findings: 3-7 short bullets, the most important specific facts.
 - sources: list of strings referencing where each major claim came from
   (e.g. "earnings analysis", "SEC chunk #41", "news headline").
@@ -135,6 +166,8 @@ fields exactly:
   "bear_case": "...",
   "risk_level": "low" | "medium" | "high",
   "confidence_score": 0.0,
+  "data_quality": 0.0,
+  "analyst_notes": "...",
   "key_findings": ["...", "..."],
   "sources": ["...", "..."]
 }

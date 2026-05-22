@@ -6,6 +6,7 @@ The user's question is passed through to all analyses (and used as the
 retrieval query for "sec").
 """
 import os
+from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 from groq import Groq
@@ -29,6 +30,73 @@ PROMPTS = {
     "risk": RISK_PROMPT,
 }
 
+# Single source of truth for the model_name strings that each ML module
+# writes to ml_predictions. Keep these in lockstep with backend/ml/*.py:
+#   earnings_predictor.py  -> "earnings_surprise_predictor"
+#   anomaly_detector.py    -> "anomaly_detector"
+#   beneish_score.py       -> "beneish_m_score"
+#   sentiment_evaluator.py -> "finbert_sentiment"
+#   peer_clustering.py     -> "peer_clustering"
+#   revenue_forecaster.py  -> "revenue_forecaster"
+ML_MODEL_NAMES = {
+    "earnings": "earnings_surprise_predictor",
+    "anomaly": "anomaly_detector",
+    "beneish": "beneish_m_score",
+    "sentiment": "finbert_sentiment",
+    "peer_clustering": "peer_clustering",
+    "revenue_forecaster": "revenue_forecaster",
+}
+
+# Stale-prediction threshold (days) for the age warning.
+ML_PREDICTION_MAX_AGE_DAYS = 7
+
+# Ratio name -> rough Beneish (1999) manipulator-mean threshold. A value
+# above this leans "elevated"; near the neutral default it carries no signal.
+BENEISH_RATIO_THRESHOLDS = {
+    "DSRI": 1.465, "GMI": 1.193, "AQI": 1.254, "SGI": 1.607,
+    "DEPI": 1.077, "SGAI": 1.041, "TATA": 0.031, "LVGI": 1.111,
+}
+BENEISH_RATIO_ORDER = ["DSRI", "GMI", "AQI", "SGI", "DEPI", "SGAI", "TATA", "LVGI"]
+
+
+def _ml_prediction_age_warning(run_date) -> str:
+    """
+    Return a stale-data warning if `run_date` is older than the threshold,
+    else "". DB timestamps are naive UTC (datetime.utcnow), so treat a
+    naive value as UTC before comparing.
+    """
+    if not run_date:
+        return ""
+    if run_date.tzinfo is None:
+        run_date = run_date.replace(tzinfo=timezone.utc)
+    age_days = (datetime.now(timezone.utc) - run_date).days
+    if age_days > ML_PREDICTION_MAX_AGE_DAYS:
+        return (
+            f"⚠ ML predictions are {age_days} days old "
+            "— consider re-running models."
+        )
+    return ""
+
+
+def _signed(value) -> str:
+    """Format a number with an explicit sign and 4 dp; pass non-numbers through."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return str(value)
+    return f"{value:+.4f}"
+
+
+def _beneish_ratio_label(name: str, value) -> str:
+    """Interpretation label for one Beneish ratio."""
+    if value is None or not isinstance(value, (int, float)):
+        return "n/a"
+    default = 0.02 if name == "TATA" else 1.0
+    if abs(value - default) < 1e-9:
+        return "[likely default]"
+    threshold = BENEISH_RATIO_THRESHOLDS.get(name)
+    if threshold is not None and value > threshold:
+        return "elevated"
+    return "normal"
+
 
 def _format_earnings_context(db, company_id: int) -> str:
     earnings = (
@@ -42,13 +110,19 @@ def _format_earnings_context(db, company_id: int) -> str:
         db.query(MLPrediction)
         .filter(
             MLPrediction.company_id == company_id,
-            MLPrediction.model_name == "earnings_surprise_predictor",
+            MLPrediction.model_name == ML_MODEL_NAMES["earnings"],
         )
         .order_by(MLPrediction.run_date.desc())
         .first()
     )
 
-    lines = ["EARNINGS HISTORY (most recent first):"]
+    lines = []
+    warning = _ml_prediction_age_warning(pred.run_date) if pred else ""
+    if warning:
+        lines.append(warning)
+        lines.append("")
+
+    lines.append("EARNINGS HISTORY (most recent first):")
     if not earnings:
         lines.append("  (no earnings rows for this company)")
     for e in earnings:
@@ -64,10 +138,27 @@ def _format_earnings_context(db, company_id: int) -> str:
         lines.append(
             f"  prediction={pred.prediction}  confidence={pred.confidence}"
         )
-        if pred.shap_values:
-            lines.append(f"  shap_values={pred.shap_values}")
-        if pred.features_used:
-            lines.append(f"  features_used={pred.features_used}")
+        shap = pred.shap_values or {}
+        feats = pred.features_used or {}
+        if shap:
+            # One feature per line, sorted by |SHAP| so the top drivers come
+            # first, with the model's input value alongside the attribution.
+            lines.append(
+                "  SHAP drivers (signed; |impact| desc) with input values:"
+            )
+            for feat, sval in sorted(
+                shap.items(), key=lambda kv: abs(kv[1] or 0), reverse=True
+            ):
+                lines.append(
+                    f"    {feat:18s} shap={_signed(sval):>10}  "
+                    f"value={_signed(feats.get(feat))}"
+                )
+        else:
+            lines.append("  SHAP values not available")
+            if feats:
+                lines.append("  features_used:")
+                for feat, fval in feats.items():
+                    lines.append(f"    {feat:18s} {_signed(fval)}")
     else:
         lines.append("ML PREDICTION (earnings_surprise_predictor): not available")
     return "\n".join(lines)
@@ -84,26 +175,36 @@ def _format_sec_context(question: str, ticker: str, k: int = 6) -> str:
     return "\n\n".join(blocks)
 
 
+NEWS_ARTICLE_CAP = 10
+
+
 def _format_news_context(db, company_id: int) -> str:
+    # Pull all scored articles, then rank by |sentiment| so the most extreme
+    # (most informative) headlines lead, rather than the most recent.
     articles = (
         db.query(NewsArticle)
         .filter(NewsArticle.company_id == company_id)
         .filter(NewsArticle.sentiment_score.isnot(None))
-        .order_by(NewsArticle.published_at.desc())
-        .limit(20)
         .all()
     )
+    articles.sort(key=lambda a: abs(a.sentiment_score or 0), reverse=True)
+
     pred = (
         db.query(MLPrediction)
         .filter(
             MLPrediction.company_id == company_id,
-            MLPrediction.model_name == "finbert_sentiment",
+            MLPrediction.model_name == ML_MODEL_NAMES["sentiment"],
         )
         .order_by(MLPrediction.run_date.desc())
         .first()
     )
 
     lines = []
+    warning = _ml_prediction_age_warning(pred.run_date) if pred else ""
+    if warning:
+        lines.append(warning)
+        lines.append("")
+
     if pred and pred.shap_values:
         lines.append("AGGREGATE SENTIMENT (finbert_sentiment):")
         for k, v in pred.shap_values.items():
@@ -113,8 +214,11 @@ def _format_news_context(db, company_id: int) -> str:
     if not articles:
         lines.append("RECENT ARTICLES: none with sentiment scores")
     else:
-        lines.append(f"RECENT ARTICLES ({len(articles)}):")
-        for a in articles:
+        shown = articles[:NEWS_ARTICLE_CAP]
+        lines.append(
+            f"ARTICLES BY |SENTIMENT| (showing {len(shown)} of {len(articles)}):"
+        )
+        for a in shown:
             score_str = (
                 f"{a.sentiment_score:+.2f}"
                 if a.sentiment_score is not None
@@ -123,6 +227,9 @@ def _format_news_context(db, company_id: int) -> str:
             lines.append(
                 f"  [{a.sentiment_label} {score_str}] {a.title} -- {a.source}"
             )
+        remaining = len(articles) - len(shown)
+        if remaining > 0:
+            lines.append(f"  ... {remaining} more articles not shown")
     return "\n".join(lines)
 
 
@@ -131,7 +238,7 @@ def _format_risk_context(db, company_id: int) -> str:
         db.query(MLPrediction)
         .filter(
             MLPrediction.company_id == company_id,
-            MLPrediction.model_name == "beneish_m_score",
+            MLPrediction.model_name == ML_MODEL_NAMES["beneish"],
         )
         .order_by(MLPrediction.run_date.desc())
         .first()
@@ -140,20 +247,40 @@ def _format_risk_context(db, company_id: int) -> str:
         db.query(MLPrediction)
         .filter(
             MLPrediction.company_id == company_id,
-            MLPrediction.model_name == "anomaly_detector",
+            MLPrediction.model_name == ML_MODEL_NAMES["anomaly"],
         )
         .order_by(MLPrediction.run_date.desc())
         .first()
     )
 
     lines = []
+    # Warn once, using the freshest of the two risk-model run dates.
+    run_dates = [p.run_date for p in (beneish, anomaly) if p and p.run_date]
+    warning = _ml_prediction_age_warning(max(run_dates)) if run_dates else ""
+    if warning:
+        lines.append(warning)
+        lines.append("")
+
     if beneish:
         lines.append("BENEISH M-SCORE:")
         lines.append(
             f"  M-Score: {beneish.prediction}  confidence: {beneish.confidence}"
         )
-        if beneish.shap_values:
-            lines.append(f"  ratios: {beneish.shap_values}")
+        ratios = beneish.shap_values or {}
+        if ratios:
+            lines.append("  Ratios (one per line, with interpretation):")
+            # Fixed Beneish order first, then any extras.
+            ordered = BENEISH_RATIO_ORDER + [
+                k for k in ratios if k not in BENEISH_RATIO_ORDER
+            ]
+            for name in ordered:
+                if name not in ratios:
+                    continue
+                value = ratios[name]
+                lines.append(
+                    f"    {name:6s} {_signed(value):>10}  "
+                    f"{_beneish_ratio_label(name, value)}"
+                )
         if beneish.features_used:
             lines.append(f"  context: {beneish.features_used}")
     else:
@@ -166,8 +293,14 @@ def _format_risk_context(db, company_id: int) -> str:
         lines.append(
             f"  anomaly_score: {anomaly.prediction}  flagged: {flagged}"
         )
-        if anomaly.shap_values:
-            lines.append(f"  feature z-scores: {anomaly.shap_values}")
+        zscores = anomaly.shap_values or {}
+        if zscores:
+            # Highest-risk (most extreme) features first.
+            lines.append("  feature z-scores (|z| desc):")
+            for feat, z in sorted(
+                zscores.items(), key=lambda kv: abs(kv[1] or 0), reverse=True
+            ):
+                lines.append(f"    {feat:22s} {_signed(z)}")
     else:
         lines.append("ANOMALY DETECTOR: not available")
     return "\n".join(lines)

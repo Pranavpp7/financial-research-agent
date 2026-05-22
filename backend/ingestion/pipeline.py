@@ -1,3 +1,4 @@
+import logging
 import os
 from datetime import datetime
 from dotenv import load_dotenv
@@ -20,6 +21,8 @@ from backend.ingestion.news_client import get_company_news
 
 load_dotenv()
 
+logger = logging.getLogger(__name__)
+
 
 def safe_float(value):
     """Convert numpy floats or any numeric type to plain Python float."""
@@ -27,7 +30,9 @@ def safe_float(value):
         if value is None or str(value) == "nan":
             return None
         return float(value)
-    except:
+    except Exception:
+        # FIXED: was a bare `except:` (also caught KeyboardInterrupt/SystemExit).
+        # Scoped to Exception; returning None is the intended coercion fallback.
         return None
 
 
@@ -42,7 +47,10 @@ def date_to_quarter(date_str: str) -> str:
         date = datetime.strptime(date_str[:10], "%Y-%m-%d")
         quarter = (date.month - 1) // 3 + 1
         return f"{date.year}-Q{quarter}"
-    except:
+    except Exception:
+        # FIXED: bare `except:` -> scoped + logged so malformed dates are
+        # visible at debug level instead of vanishing silently.
+        logger.debug("date_to_quarter failed to parse %r", date_str, exc_info=True)
         return None
 
 

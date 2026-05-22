@@ -19,6 +19,14 @@ load_dotenv()
 SYNTHESIZER_MODEL = "llama-3.3-70b-versatile"
 
 
+def _clamp_unit(value, default: float = 0.0) -> float:
+    """Coerce an LLM-supplied number into [0.0, 1.0]; fall back on garbage."""
+    try:
+        return max(0.0, min(1.0, float(value)))
+    except (TypeError, ValueError):
+        return default
+
+
 class Synthesizer:
     def __init__(self, model: str = SYNTHESIZER_MODEL):
         api_key = os.getenv("GROQ_API_KEY")
@@ -62,6 +70,15 @@ class Synthesizer:
         except Exception as e:
             return {"error": f"synthesis call failed: {e}"}
 
+        # Parse + clamp the new quality fields. The LLM may omit or
+        # mis-type them, so coerce defensively into [0, 1] / a string.
+        data_quality = _clamp_unit(report_data.get("data_quality"))
+        analyst_notes = report_data.get("analyst_notes") or ""
+        # Write the clamped/normalized values back so the returned dict and
+        # the persisted row agree.
+        report_data["data_quality"] = data_quality
+        report_data["analyst_notes"] = analyst_notes
+
         # Persist
         db = SessionLocal()
         try:
@@ -71,6 +88,8 @@ class Synthesizer:
                 "risk_level": report_data.get("risk_level", "medium"),
                 "overall_sentiment": None,
                 "confidence_score": float(report_data.get("confidence_score", 0.0)),
+                "data_quality": data_quality,
+                "analyst_notes": analyst_notes,
                 "sources": report_data.get("sources", []),
             })
             # One ReportCitation row per key_finding -- the synthesis prompt

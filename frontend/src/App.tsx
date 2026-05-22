@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Activity, Zap } from "lucide-react";
+import { Activity, Download, Zap } from "lucide-react";
 import MetricsGrid from "./components/MetricsGrid";
 import ReportCard from "./components/ReportCard";
 import SearchPanel from "./components/SearchPanel";
@@ -116,6 +116,19 @@ export default function App() {
     }
   };
 
+  const downloadReport = () => {
+    if (!report) return;
+    const blob = new Blob([JSON.stringify(report, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${report.ticker}_report.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const loading = status === "submitting" || status === "running";
 
   return (
@@ -138,7 +151,26 @@ export default function App() {
         <SentimentChart />
 
         <AnimatePresence mode="wait">
-          {report && <ReportCard key={report.ticker + report.generated_at} report={report} />}
+          {report && (
+            <div key={report.ticker + report.generated_at} className="flex flex-col gap-3">
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={downloadReport}
+                  className="
+                    flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium
+                    bg-[--color-bg-base]/70 border border-[--color-border-edge]
+                    text-slate-300 hover:text-slate-100 hover:border-indigo-500/50
+                    transition-colors
+                  "
+                >
+                  <Download size={14} />
+                  Download JSON
+                </button>
+              </div>
+              <ReportCard report={report} />
+            </div>
+          )}
         </AnimatePresence>
       </main>
     </div>
