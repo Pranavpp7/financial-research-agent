@@ -8,17 +8,21 @@ retrieval query for "sec").
 import os
 from datetime import datetime, timezone
 
+import structlog
 from dotenv import load_dotenv
 from groq import Groq
 
+from backend.core.rate_limiter import get_rate_limiter
 from backend.db.session import SessionLocal
 from backend.db.models import Earning, MLPrediction, NewsArticle
 from backend.agents.prompts import (
-    EARNINGS_PROMPT, NEWS_PROMPT, RISK_PROMPT, SEC_PROMPT,
+    EARNINGS_PROMPT, FORECAST_PROMPT, NEWS_PROMPT, RISK_PROMPT, SEC_PROMPT,
 )
 from backend.rag.retriever import search as rag_search
 
 load_dotenv()
+
+logger = structlog.get_logger(__name__)
 
 
 ANALYZER_MODEL = "llama-3.3-70b-versatile"
@@ -28,6 +32,7 @@ PROMPTS = {
     "sec": SEC_PROMPT,
     "news": NEWS_PROMPT,
     "risk": RISK_PROMPT,
+    "forecast": FORECAST_PROMPT,
 }
 
 # Single source of truth for the model_name strings that each ML module
@@ -122,6 +127,23 @@ def _format_earnings_context(db, company_id: int) -> str:
         lines.append(warning)
         lines.append("")
 
+    # Cold-start sentinel (written by earnings_predictor when a company has
+    # fewer than MIN_QUARTERS_REQUIRED quarters): surface the gap up front so
+    # the LLM treats the missing ML signal as a data-coverage issue rather
+    # than a bearish signal.
+    pred_shap = pred.shap_values if (pred and isinstance(pred.shap_values, dict)) else {}
+    cold_start = pred_shap.get("status") == "insufficient_data"
+    if cold_start:
+        lines.append("⚠ EARNINGS MODEL: INSUFFICIENT DATA (cold start)")
+        lines.append(
+            f"  Only {pred_shap.get('quarters_available')} usable quarter(s) of "
+            f"earnings history are on file; the earnings_surprise_predictor "
+            f"needs {pred_shap.get('quarters_required')}. No surprise prediction "
+            "is available. Treat this as a data-coverage gap for a newly-tracked "
+            "company, NOT as a negative signal."
+        )
+        lines.append("")
+
     lines.append("EARNINGS HISTORY (most recent first):")
     if not earnings:
         lines.append("  (no earnings rows for this company)")
@@ -133,7 +155,12 @@ def _format_earnings_context(db, company_id: int) -> str:
         )
 
     lines.append("")
-    if pred:
+    if cold_start:
+        lines.append(
+            "ML PREDICTION (earnings_surprise_predictor): insufficient data "
+            "(see cold-start notice above)"
+        )
+    elif pred:
         lines.append("ML PREDICTION (earnings_surprise_predictor):")
         lines.append(
             f"  prediction={pred.prediction}  confidence={pred.confidence}"
@@ -306,6 +333,79 @@ def _format_risk_context(db, company_id: int) -> str:
     return "\n".join(lines)
 
 
+def _format_forecast_context(db, company_id: int) -> str:
+    """Format the revenue_forecaster + peer_clustering predictions for the LLM."""
+    forecast = (
+        db.query(MLPrediction)
+        .filter(
+            MLPrediction.company_id == company_id,
+            MLPrediction.model_name == ML_MODEL_NAMES["revenue_forecaster"],
+        )
+        .order_by(MLPrediction.run_date.desc())
+        .first()
+    )
+    peers = (
+        db.query(MLPrediction)
+        .filter(
+            MLPrediction.company_id == company_id,
+            MLPrediction.model_name == ML_MODEL_NAMES["peer_clustering"],
+        )
+        .order_by(MLPrediction.run_date.desc())
+        .first()
+    )
+
+    lines = []
+    run_dates = [p.run_date for p in (forecast, peers) if p and p.run_date]
+    warning = _ml_prediction_age_warning(max(run_dates)) if run_dates else ""
+    if warning:
+        lines.append(warning)
+        lines.append("")
+
+    # ── Revenue forecast ──
+    if forecast:
+        sv = forecast.shap_values or {}
+        if sv.get("status") == "insufficient_data":
+            lines.append("REVENUE FORECAST: INSUFFICIENT DATA")
+            lines.append(
+                f"  Only {sv.get('quarters_available')} quarter(s) of revenue "
+                f"history; the forecaster needs {sv.get('quarters_required')}. "
+                "No revenue forecast is available."
+            )
+        else:
+            lines.append("REVENUE FORECAST (revenue_forecaster):")
+            lines.append(
+                f"  next quarter: {forecast.prediction}  "
+                f"confidence: {forecast.confidence}"
+            )
+            lines.append(f"  forecast_next_q:      {sv.get('forecast_next_q')}")
+            lines.append(f"  forecast_2q:          {sv.get('forecast_2q')}")
+            lines.append(f"  trend_direction:      {sv.get('trend_direction')}")
+            lines.append(f"  seasonality_strength: {sv.get('seasonality_strength')}")
+            lines.append(f"  periods_used:         {sv.get('periods_used')}")
+    else:
+        lines.append("REVENUE FORECAST (revenue_forecaster): not available")
+
+    lines.append("")
+
+    # ── Peer cluster ──
+    if peers:
+        sv = peers.shap_values or {}
+        lines.append("PEER CLUSTER (peer_clustering):")
+        lines.append(
+            f"  cluster {sv.get('cluster_id')} "
+            f"({sv.get('cluster_label')})  size: {sv.get('cluster_size')}"
+        )
+        peer_tickers = sv.get("peer_tickers") or []
+        lines.append(
+            f"  peers: {', '.join(peer_tickers) if peer_tickers else '(none)'}"
+        )
+        lines.append(f"  fit confidence (silhouette): {peers.confidence}")
+    else:
+        lines.append("PEER CLUSTER (peer_clustering): not available")
+
+    return "\n".join(lines)
+
+
 class Analyzer:
     def __init__(self, model: str = ANALYZER_MODEL):
         api_key = os.getenv("GROQ_API_KEY")
@@ -338,12 +438,16 @@ class Analyzer:
                     context = _format_earnings_context(db, company_id)
                 elif analysis_type == "news":
                     context = _format_news_context(db, company_id)
+                elif analysis_type == "forecast":
+                    context = _format_forecast_context(db, company_id)
                 else:  # risk
                     context = _format_risk_context(db, company_id)
             finally:
                 db.close()
 
+        logger.info("analysis_start", ticker=ticker, analysis=analysis_type)
         try:
+            get_rate_limiter().acquire("groq")
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
@@ -359,4 +463,5 @@ class Analyzer:
             text = response.choices[0].message.content
             return {"type": analysis_type, "text": text, "context": context}
         except Exception as e:
+            logger.error("analysis_llm_failed", ticker=ticker, analysis=analysis_type, error=str(e))
             return {"type": analysis_type, "text": "", "error": str(e)}
