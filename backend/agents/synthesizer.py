@@ -5,15 +5,19 @@ Calls Groq in JSON mode, parses, and persists to reports + report_citations.
 import json
 import os
 
+import structlog
 from dotenv import load_dotenv
 from groq import Groq
 
 from backend.agents.prompts import SYNTHESIS_PROMPT
+from backend.core.rate_limiter import get_rate_limiter
 from backend.db.crud import save_report
 from backend.db.models import ReportCitation
 from backend.db.session import SessionLocal
 
 load_dotenv()
+
+logger = structlog.get_logger(__name__)
 
 
 SYNTHESIZER_MODEL = "llama-3.3-70b-versatile"
@@ -49,7 +53,9 @@ class Synthesizer:
         context = "\n\n---\n\n".join(blocks)
 
         # Call LLM in JSON mode
+        logger.info("synthesis_start", ticker=ticker, n_analyses=len(analyses))
         try:
+            get_rate_limiter().acquire("groq")
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
@@ -66,8 +72,10 @@ class Synthesizer:
             raw = response.choices[0].message.content
             report_data = json.loads(raw)
         except json.JSONDecodeError as e:
+            logger.error("synthesis_json_error", ticker=ticker, error=str(e))
             return {"error": f"synthesis returned invalid JSON: {e}", "raw": raw}
         except Exception as e:
+            logger.error("synthesis_call_failed", ticker=ticker, error=str(e))
             return {"error": f"synthesis call failed: {e}"}
 
         # Parse + clamp the new quality fields. The LLM may omit or
@@ -107,7 +115,20 @@ class Synthesizer:
                 ))
             db.commit()
             report_data["report_id"] = report.id
+
+            # Fire risk-transition alerts (must never break the pipeline).
+            from backend.core.alerts import dispatch_alerts
+            try:
+                dispatch_alerts(db, report)
+            except Exception as e:
+                logger.error("alert_dispatch_failed", error=str(e), report_id=report.id)
         finally:
             db.close()
 
+        logger.info(
+            "synthesis_complete", ticker=ticker,
+            report_id=report_data.get("report_id"),
+            risk_level=report_data.get("risk_level"),
+            data_quality=report_data.get("data_quality"),
+        )
         return report_data
