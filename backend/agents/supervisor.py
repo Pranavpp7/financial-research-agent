@@ -9,13 +9,16 @@ instance; just a prompt that produces a route.
 import json
 import os
 
+import structlog
 from dotenv import load_dotenv
 from groq import Groq
 
 load_dotenv()
 
+logger = structlog.get_logger(__name__)
 
-VALID_ANALYSES = ["earnings", "sec", "news", "risk"]
+
+VALID_ANALYSES = ["earnings", "sec", "news", "risk", "forecast"]
 SUPERVISOR_MODEL = "llama-3.3-70b-versatile"
 
 
@@ -27,6 +30,11 @@ more specialized analyses. The available analyses are:
 - "sec": semantic search over the company's SEC filings (10-K/10-Q)
 - "news": recent news articles with FinBERT sentiment scores
 - "risk": Beneish M-Score + anomaly detector for accounting/financial risk
+- "forecast": Prophet revenue forecast + KMeans peer cluster -- useful for
+  growth trajectory and competitive positioning questions
+
+Route "forecast" for questions about revenue growth, future outlook,
+competitive position, or peer comparison.
 
 Pick the minimum subset required to answer the question well. Always
 include at least one analysis. Respond with ONLY a JSON object of the form
@@ -60,7 +68,11 @@ class Supervisor:
             analyses = [a for a in data.get("analyses", []) if a in VALID_ANALYSES]
             if not analyses:
                 raise ValueError("supervisor returned no valid analyses")
+            logger.info("supervisor_route", ticker=ticker, analyses=analyses)
             return analyses
         except Exception as e:
-            print(f"Supervisor decision failed ({e}); falling back to all analyses.")
+            logger.warning(
+                "supervisor_fallback", ticker=ticker, error=str(e),
+                fallback=list(VALID_ANALYSES),
+            )
             return list(VALID_ANALYSES)
