@@ -1,15 +1,19 @@
 """Routes: submit analyses, poll status, fetch saved reports, list companies."""
+import io
+
 from celery.result import AsyncResult
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy import func
 
 from backend.api.schemas.requests import AnalysisRequest
 from backend.api.schemas.responses import (
+    ReportHistoryItem,
     ReportResponse,
     TaskResponse,
     TaskStatusResponse,
 )
-from backend.db.crud import get_company, get_latest_report
+from backend.db.crud import get_company
 from backend.db.models import Company, MLPrediction, Report, ReportCitation
 from backend.db.session import SessionLocal
 from backend.tasks.analysis_tasks import run_analysis_task
@@ -30,9 +34,26 @@ _STATE_MAP = {
 }
 
 
+def _latest_shap(db, company_id: int, model_name: str) -> dict | None:
+    """Latest non-sentinel shap_values dict for a model, or None."""
+    pred = (
+        db.query(MLPrediction)
+        .filter(
+            MLPrediction.company_id == company_id,
+            MLPrediction.model_name == model_name,
+        )
+        .order_by(MLPrediction.run_date.desc())
+        .first()
+    )
+    if not pred or not isinstance(pred.shap_values, dict):
+        return None
+    return pred.shap_values
+
+
 def _build_report_response(report: Report, company: Company) -> ReportResponse:
     # key_findings live in report_citations (one row per finding), not on
-    # the report row itself -- pull them back in insertion order.
+    # the report row itself -- pull them back in insertion order. Forecast +
+    # peer signals come from the latest ml_predictions rows for the company.
     db = SessionLocal()
     try:
         findings = [
@@ -45,10 +66,13 @@ def _build_report_response(report: Report, company: Company) -> ReportResponse:
             )
             if c.claim_text
         ]
+        forecast = _latest_shap(db, company.id, "revenue_forecaster")
+        peers = _latest_shap(db, company.id, "peer_clustering")
     finally:
         db.close()
 
     return ReportResponse(
+        report_id=report.id,
         ticker=company.ticker,
         company_name=company.name,
         generated_at=report.generated_at,
@@ -60,13 +84,17 @@ def _build_report_response(report: Report, company: Company) -> ReportResponse:
         analyst_notes=report.analyst_notes,
         key_findings=findings,
         sources=report.sources or [],
+        forecast=forecast,
+        peers=peers,
     )
 
 
 @router.post("/analyze", response_model=TaskResponse)
 def submit_analysis(request: AnalysisRequest) -> TaskResponse:
     """Queue an analysis. Returns a task_id to poll."""
-    task = run_analysis_task.delay(request.ticker, request.question)
+    task = run_analysis_task.delay(
+        request.ticker, request.question, request.force_refresh
+    )
     return TaskResponse(
         task_id=task.id,
         status="pending",
@@ -81,6 +109,17 @@ def get_task_status(task_id: str) -> TaskStatusResponse:
     state = async_result.state
     status = _STATE_MAP.get(state, state.lower())
 
+    # Custom PROGRESS state carries {stage, message, pct} in meta.
+    if state == "PROGRESS":
+        meta = async_result.info if isinstance(async_result.info, dict) else {}
+        return TaskStatusResponse(
+            task_id=task_id,
+            status="progress",
+            stage=meta.get("stage"),
+            message=meta.get("message"),
+            pct=meta.get("pct"),
+        )
+
     if state == "FAILURE":
         return TaskStatusResponse(
             task_id=task_id,
@@ -93,6 +132,17 @@ def get_task_status(task_id: str) -> TaskStatusResponse:
 
     task_payload = async_result.result or {}
     if "error" in task_payload:
+        # Rate-limit errors carry extra fields the frontend uses for its
+        # countdown banner.
+        if task_payload["error"] == "rate_limit_exceeded":
+            return TaskStatusResponse(
+                task_id=task_id,
+                status="failed",
+                error="rate_limit_exceeded",
+                service=task_payload.get("service"),
+                retry_after_seconds=task_payload.get("retry_after_seconds"),
+                message=task_payload.get("message"),
+            )
         return TaskStatusResponse(
             task_id=task_id, status="failed", error=task_payload["error"],
         )
@@ -112,26 +162,94 @@ def get_task_status(task_id: str) -> TaskStatusResponse:
                 )
                 if company:
                     report_resp = _build_report_response(report, company)
+                    # Surface cache provenance from the task payload.
+                    report_resp.from_cache = bool(task_payload.get("from_cache"))
+                    report_resp.age_minutes = task_payload.get("age_minutes")
         finally:
             db.close()
 
     return TaskStatusResponse(task_id=task_id, status=status, result=report_resp)
 
 
-@router.get("/reports/{ticker}", response_model=ReportResponse)
-def get_latest_report_for(ticker: str) -> ReportResponse:
-    """Latest saved report for a ticker (does not trigger a new analysis)."""
+@router.get("/reports/{ticker}", response_model=list[ReportHistoryItem])
+def get_report_history(ticker: str) -> list[ReportHistoryItem]:
+    """All saved reports for a ticker, newest first (no new analysis)."""
     db = SessionLocal()
     try:
         company = get_company(db, ticker.upper())
         if not company:
             raise HTTPException(status_code=404, detail=f"unknown ticker {ticker}")
-        report = get_latest_report(db, company.id)
+        reports = (
+            db.query(Report)
+            .filter(Report.company_id == company.id)
+            .order_by(Report.generated_at.desc())
+            .all()
+        )
+        items: list[ReportHistoryItem] = []
+        for r in reports:
+            findings = [
+                c.claim_text
+                for c in (
+                    db.query(ReportCitation)
+                    .filter(ReportCitation.report_id == r.id)
+                    .order_by(ReportCitation.id.asc())
+                    .all()
+                )
+                if c.claim_text
+            ]
+            items.append(ReportHistoryItem(
+                report_id=r.id,
+                created_at=r.generated_at,
+                risk_level=r.risk_level,
+                confidence_score=r.confidence_score,
+                bull_case=r.bull_case,
+                bear_case=r.bear_case,
+                key_findings=findings,
+                data_quality=r.data_quality,
+                analyst_notes=r.analyst_notes,
+            ))
+        return items
+    finally:
+        db.close()
+
+
+@router.get("/reports/{report_id}/pdf")
+def export_report_pdf(report_id: int):
+    """Render a saved report as a downloadable PDF."""
+    from backend.core.pdf_export import render_report_pdf
+
+    db = SessionLocal()
+    try:
+        report = db.query(Report).filter(Report.id == report_id).first()
         if not report:
-            raise HTTPException(
-                status_code=404, detail=f"no report for {ticker} -- run /analyze first",
-            )
-        return _build_report_response(report, company)
+            raise HTTPException(status_code=404, detail=f"report {report_id} not found")
+        company = db.query(Company).filter(Company.id == report.company_id).first()
+        if not company:
+            raise HTTPException(status_code=404, detail="company not found")
+        ml_predictions = (
+            db.query(MLPrediction)
+            .filter(MLPrediction.company_id == company.id)
+            .order_by(MLPrediction.run_date.desc())
+            .all()
+        )
+        try:
+            pdf_bytes = render_report_pdf(report, company, ml_predictions)
+        except Exception as e:
+            # WeasyPrint native libs may be missing in some environments.
+            raise HTTPException(status_code=500, detail=f"PDF render failed: {e}")
+
+        date_str = (
+            report.generated_at.strftime("%Y%m%d") if report.generated_at else "report"
+        )
+        filename = f"{company.ticker}_{date_str}.pdf"
+        return StreamingResponse(
+            io.BytesIO(pdf_bytes),
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Cache-Control": "private, max-age=3600",
+            },
+        )
     finally:
         db.close()
 
