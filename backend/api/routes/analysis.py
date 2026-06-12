@@ -1,5 +1,6 @@
 """Routes: submit analyses, poll status, fetch saved reports, list companies."""
 import io
+from datetime import datetime, timezone
 
 from celery.result import AsyncResult
 from fastapi import APIRouter, HTTPException
@@ -216,6 +217,9 @@ def get_report_history(ticker: str) -> list[ReportHistoryItem]:
 @router.get("/reports/{report_id}/pdf")
 def export_report_pdf(report_id: int):
     """Render a saved report as a downloadable PDF."""
+    # Imported lazily on purpose: pdf_export pulls in WeasyPrint, which needs
+    # native cairo/pango libs. Keeping it out of module scope means the rest of
+    # the API still imports and runs on hosts without those system libraries.
     from backend.core.pdf_export import render_report_pdf
 
     db = SessionLocal()
@@ -280,8 +284,6 @@ def get_stats():
     finbert prediction per company, reports created today (UTC), and a fixed
     count of ML models that exist in this project.
     """
-    from datetime import datetime, timezone
-
     db = SessionLocal()
     try:
         total_companies = db.query(func.count(Company.id)).scalar() or 0

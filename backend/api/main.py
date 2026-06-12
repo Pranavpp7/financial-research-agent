@@ -7,14 +7,21 @@ Run:
 Requires a Celery worker for /analyze to actually process tasks:
   celery -A backend.tasks.celery_app worker --loglevel=info --pool=threads
 """
+import os
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 
+import redis
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import func
 
 from backend.api.routes import alerts, analysis, backtest, watchlist
 from backend.core.logging import configure_logging
+from backend.core.rate_limiter import GROQ, NEWSAPI, get_rate_limiter
 from backend.core.startup import health_snapshot, run_startup_checks
+from backend.db.models import Report, ScheduledRun
+from backend.db.session import SessionLocal
 
 # Configure structured logging before the app handles any request.
 configure_logging()
@@ -36,10 +43,20 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Dev-friendly CORS. Tighten allow_origins for production.
+# CORS. `allow_origins=["*"]` is invalid alongside `allow_credentials=True`
+# (browsers reject the wildcard for credentialed requests), so origins are
+# an explicit allowlist — configurable via CORS_ORIGINS (comma-separated),
+# defaulting to the local Vite/React dev servers.
+_cors_origins = [
+    origin.strip()
+    for origin in os.getenv(
+        "CORS_ORIGINS", "http://localhost:5173,http://localhost:3000"
+    ).split(",")
+    if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -77,17 +94,9 @@ def health():
 @app.get("/schedule/status")
 def schedule_status():
     """Beat liveness, next scheduled runs, and last-run summaries."""
-    import os
-    from datetime import datetime, timedelta, timezone
-
-    from backend.db.models import ScheduledRun
-    from backend.db.session import SessionLocal
-
     # Beat liveness via the heartbeat Redis key (refreshed every minute).
     beat_running = False
     try:
-        import redis
-
         client = redis.from_url(
             os.getenv("REDIS_URL", "redis://localhost:6379/0"),
             socket_connect_timeout=2,
@@ -151,13 +160,6 @@ def schedule_status():
 def cache_stats():
     """Report-cache stats. hit_rate / savings need an llm_usage table that
     does not exist yet, so those fields are null."""
-    import os
-
-    from sqlalchemy import func
-
-    from backend.db.models import Report
-    from backend.db.session import SessionLocal
-
     db = SessionLocal()
     try:
         cached_count = (
@@ -179,8 +181,6 @@ def cache_stats():
 @app.get("/rate-limits")
 def rate_limits():
     """Current remaining quota for the external APIs (internal use)."""
-    from backend.core.rate_limiter import GROQ, NEWSAPI, get_rate_limiter
-
     limiter = get_rate_limiter()
     return {
         "newsapi": {
