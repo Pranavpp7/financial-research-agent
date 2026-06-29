@@ -9,7 +9,6 @@ Alert subscription + history routes.
 """
 import re
 import types
-from datetime import datetime, timezone
 
 import structlog
 from fastapi import APIRouter, HTTPException
@@ -22,7 +21,7 @@ from backend.core.alerts import (
     send_email,
     send_slack,
 )
-from backend.db.models import AlertHistory, AlertSubscription
+from backend.db.models import AlertHistory, AlertSubscription, Company, utcnow
 from backend.db.session import SessionLocal
 
 router = APIRouter()
@@ -60,15 +59,23 @@ def _validate(channel: str, destination: str, triggers: list[str]) -> None:
 @router.post("/alerts/subscribe")
 def subscribe(req: SubscribeRequest) -> dict:
     _validate(req.channel, req.destination, req.triggers)
+    ticker = req.ticker.upper()
     db = SessionLocal()
     try:
+        # Only allow alerts on tickers we actually track — otherwise the
+        # subscription can never fire (no reports are ever generated for it).
+        if not db.query(Company).filter(Company.ticker == ticker).first():
+            raise HTTPException(
+                status_code=400,
+                detail=f"{ticker} not in database -- run ingestion first",
+            )
         sub = AlertSubscription(
-            ticker=req.ticker.upper(),
+            ticker=ticker,
             channel=req.channel,
             destination=req.destination,
             triggers=req.triggers,
             active=1,
-            created_at=datetime.now(timezone.utc),
+            created_at=utcnow(),
         )
         db.add(sub)
         db.commit()
@@ -165,7 +172,7 @@ def test_alert(subscription_id: int) -> dict:
 
         db.add(AlertHistory(
             subscription_id=sub.id,
-            fired_at=datetime.now(timezone.utc),
+            fired_at=utcnow(),
             trigger_type="test",
             report_id_before=None,
             report_id_after=None,
