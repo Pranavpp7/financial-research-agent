@@ -34,9 +34,48 @@ _STATE_MAP = {
     "REVOKED": "failed",
 }
 
+# Celery reports PENDING both for tasks not-yet-picked-up AND for completely
+# unknown task IDs (typo'd or expired past result_expires) -- so a bad id
+# would otherwise poll "pending" forever. On submit we drop a short-lived
+# marker key; a PENDING task with no marker is treated as unknown/expired.
+_TASK_MARKER_PREFIX = "fra:task-known:"
+_TASK_MARKER_TTL = int(celery_app.conf.result_expires or 3600)
+
+
+def _task_backend_redis():
+    """Celery's Redis result-backend client, or None if unavailable."""
+    try:
+        return celery_app.backend.client
+    except Exception:
+        return None
+
+
+def _mark_task_submitted(task_id: str) -> None:
+    client = _task_backend_redis()
+    if client is not None:
+        try:
+            client.set(f"{_TASK_MARKER_PREFIX}{task_id}", "1", ex=_TASK_MARKER_TTL)
+        except Exception:
+            pass  # marker is best-effort; never block submission
+
+
+def _task_is_known(task_id: str) -> bool:
+    """True unless we can positively confirm the id was never submitted.
+    Fails open (returns True) if Redis is unreachable, so a transient Redis
+    blip never mislabels a real in-flight task as unknown."""
+    client = _task_backend_redis()
+    if client is None:
+        return True
+    try:
+        return bool(client.exists(f"{_TASK_MARKER_PREFIX}{task_id}"))
+    except Exception:
+        return True
+
 
 def _latest_shap(db, company_id: int, model_name: str) -> dict | None:
-    """Latest non-sentinel shap_values dict for a model, or None."""
+    """Latest shap_values dict for a model, or None. Cold-start sentinel
+    rows (status='insufficient_data') are returned as-is — the frontend
+    renders them as an explicit "insufficient history" card."""
     pred = (
         db.query(MLPrediction)
         .filter(
@@ -96,6 +135,7 @@ def submit_analysis(request: AnalysisRequest) -> TaskResponse:
     task = run_analysis_task.delay(
         request.ticker, request.question, request.force_refresh
     )
+    _mark_task_submitted(task.id)
     return TaskResponse(
         task_id=task.id,
         status="pending",
@@ -109,6 +149,14 @@ def get_task_status(task_id: str) -> TaskStatusResponse:
     async_result = AsyncResult(task_id, app=celery_app)
     state = async_result.state
     status = _STATE_MAP.get(state, state.lower())
+
+    # A bare PENDING with no submission marker means the id was never queued
+    # (typo) or its result has expired -- report that instead of "pending".
+    if state == "PENDING" and not _task_is_known(task_id):
+        raise HTTPException(
+            status_code=404,
+            detail="unknown or expired task id",
+        )
 
     # Custom PROGRESS state carries {stage, message, pct} in meta.
     if state == "PROGRESS":
