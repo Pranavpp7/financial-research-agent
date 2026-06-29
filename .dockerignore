@@ -1,0 +1,33 @@
+# Keep the build context small and — critically — keep the host's Windows
+# .venv from clobbering the Linux venv `uv sync` builds inside the image,
+# and keep real secrets (.env*) out of image layers.
+.venv
+__pycache__
+*.py[oc]
+.pytest_cache
+
+# Secrets — never bake into an image layer
+.env
+.env.*
+!.env.example
+
+# VCS / editor / agent config
+.git
+.gitignore
+.claude
+.idea
+.vscode
+
+# ML artifacts and local DBs (mounted as volumes instead)
+mlruns
+mlflow.db
+*.pkl
+*.ubj
+
+# Frontend is built/served separately
+frontend/node_modules
+frontend/dist
+
+# Docker files themselves
+Dockerfile
+docker-compose*.yml

@@ -1,0 +1,176 @@
+# Production stack for financial-research-agent.
+#
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# All secrets come from .env.prod (NOT .env). Only the api (and flower) are
+# exposed externally; postgres/redis stay on the internal fra-net network.
+#
+# NOTE on EXPOSE_DB: docker-compose cannot toggle a port mapping from a build
+# arg, so the postgres `ports` block is commented out by default (DB stays
+# internal). Uncomment it only for debugging.
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    env_file: .env.prod
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    # ports:                       # EXPOSE_DB: uncomment for debugging only
+    #   - "127.0.0.1:5432:5432"
+    mem_limit: 2g
+    cpus: 1.0
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks: [fra-net]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    mem_limit: 512m
+    cpus: 0.5
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks: [fra-net]
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env.prod
+    command: >
+      gunicorn backend.api.main:app -w 4 -k uvicorn.workers.UvicornWorker
+      --bind 0.0.0.0:8000 --access-logfile - --error-logfile - --log-level info
+    ports:
+      - "80:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - model_cache:/models
+      - mlflow_data:/app/mlruns
+    mem_limit: 2g
+    cpus: 2.0
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks: [fra-net]
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env.prod
+    command: >
+      celery -A backend.tasks.celery_app worker --loglevel=info
+      --concurrency=2 -Q analysis --hostname=worker@%h
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - model_cache:/models
+      - mlflow_data:/app/mlruns
+    mem_limit: 4g
+    cpus: 2.0
+    logging: *default-logging
+    networks: [fra-net]
+
+  embedder:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: "no"            # one-shot: embed unembedded filings then exit
+    env_file: .env.prod
+    # Call the venv's python directly: `uv run` would re-sync the environment
+    # (incl. dev deps) on every container start.
+    command: python -m backend.rag.embedder
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - model_cache:/models
+    mem_limit: 6g
+    cpus: 2.0
+    logging: *default-logging
+    networks: [fra-net]
+
+  # Celery beat scheduler. CRITICAL: run exactly ONE replica -- Celery beat
+  # is not multi-instance safe and multiple beats would double-fire every
+  # scheduled task. Do not scale this service.
+  beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A backend.tasks.celery_app beat --loglevel=info
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    env_file: .env.prod
+    mem_limit: 256m
+    cpus: 0.5
+    logging: *default-logging
+    networks: [fra-net]
+
+  flower:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env.prod
+    command: celery -A backend.tasks.celery_app flower --port=5555
+    environment:
+      FLOWER_BASIC_AUTH: ${FLOWER_BASIC_AUTH}
+    ports:
+      - "5555:5555"
+    depends_on:
+      redis:
+        condition: service_healthy
+    mem_limit: 512m
+    cpus: 0.5
+    logging: *default-logging
+    networks: [fra-net]
+
+networks:
+  fra-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  mlflow_data:
+  model_cache:
