@@ -78,13 +78,15 @@ class Synthesizer:
             logger.error("synthesis_call_failed", ticker=ticker, error=str(e))
             return {"error": f"synthesis call failed: {e}"}
 
-        # Parse + clamp the new quality fields. The LLM may omit or
-        # mis-type them, so coerce defensively into [0, 1] / a string.
+        # Parse + clamp numeric fields. The LLM may omit or mis-type them
+        # (e.g. confidence_score: "high"), so coerce defensively into [0, 1].
         data_quality = _clamp_unit(report_data.get("data_quality"))
+        confidence = _clamp_unit(report_data.get("confidence_score"))
         analyst_notes = report_data.get("analyst_notes") or ""
         # Write the clamped/normalized values back so the returned dict and
         # the persisted row agree.
         report_data["data_quality"] = data_quality
+        report_data["confidence_score"] = confidence
         report_data["analyst_notes"] = analyst_notes
 
         # Persist
@@ -95,7 +97,7 @@ class Synthesizer:
                 "bear_case": report_data.get("bear_case", ""),
                 "risk_level": report_data.get("risk_level", "medium"),
                 "overall_sentiment": None,
-                "confidence_score": float(report_data.get("confidence_score", 0.0)),
+                "confidence_score": confidence,
                 "data_quality": data_quality,
                 "analyst_notes": analyst_notes,
                 "sources": report_data.get("sources", []),
@@ -104,7 +106,6 @@ class Synthesizer:
             # doesn't link claims to specific source IDs, so source_type is
             # always "synthesis" and source_id stays null. Refine later if
             # the prompt is upgraded to emit per-claim citations.
-            confidence = float(report_data.get("confidence_score", 0.0))
             for finding in report_data.get("key_findings", []):
                 db.add(ReportCitation(
                     report_id=report.id,
