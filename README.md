@@ -1,18 +1,16 @@
-# Financial Research Agent
+# Financial Research Platform
 
-An LLM-orchestrated equity-research platform. Ask a natural-language question
-about a public company and it routes the question to the right mix of
-specialist analyses — SEC-filing semantic search, earnings-surprise
+Ask a natural-language question about a public company and get a structured,
+source-cited research report. The system routes the question to the right mix
+of specialist analyses — SEC-filing semantic search, earnings-surprise
 prediction, news sentiment, accounting-risk models, and revenue forecasting —
-then synthesizes a structured, source-cited research report (bull case, bear
-case, risk level, confidence).
+then synthesizes bull/bear cases, risk level, and confidence.
 
 Built as a portfolio project to demonstrate a production-shaped system:
 multi-source ingestion, a vector RAG pipeline, six ML models with
-explainability, an async task queue, scheduled re-analysis, alerting,
-backtesting, and a React dashboard — all containerized.
+explainability, an async task queue, and a React dashboard — all containerized.
 
-> ⚠️ For research and educational use only. Nothing here is financial advice.
+> For research and educational use only. Nothing here is financial advice.
 
 ---
 
@@ -30,19 +28,17 @@ backtesting, and a React dashboard — all containerized.
                     └──────┬──────┘   once per selected analysis
                            │  specialist analyses
                            ▼
-                    ┌─────────────┐   merges analyses into a single JSON report,
-                    │ Synthesizer │   persists report + citations, fires alerts
+                    ┌─────────────┐   merges analyses into a single JSON report
+                    │ Synthesizer │   and persists report + citations
                     └──────┬──────┘
                            ▼
               reports + report_citations  ──►  FastAPI  ──►  React dashboard
 ```
 
-The agent layer is **one LLM used as several personas**, not many agent
-instances: the supervisor produces a route, the analyzer runs each selected
-persona against the relevant data, and the synthesizer combines the outputs.
-Long-running analysis is dispatched to **Celery** so the API stays responsive,
-and a **Celery beat** schedule re-analyzes the watchlist nightly and re-ingests
-data weekly.
+One LLM is used as several personas: the supervisor produces a route, the
+analyzer runs each selected persona against the relevant data, and the
+synthesizer combines the outputs. Long-running analysis is dispatched to
+**Celery** so the API stays responsive.
 
 ### Data & ML
 
@@ -69,7 +65,7 @@ company.
 
 **Backend** Python 3.13 · FastAPI · SQLAlchemy 2 · PostgreSQL + pgvector ·
 Redis · Celery · Groq (Llama 3.3 70B) · XGBoost · Prophet · scikit-learn ·
-SHAP · sentence-transformers · MLflow · Ragas · WeasyPrint (PDF export)
+SHAP · sentence-transformers · MLflow · Ragas
 
 **Frontend** React 19 · TypeScript · Vite · Tailwind · Recharts · Framer Motion
 
@@ -81,16 +77,18 @@ migrations
 ## Getting started
 
 ### Prerequisites
-- [uv](https://docs.astral.sh/uv/) (Python package manager)
+- [uv](https://astral.sh/uv/) (Python package manager)
 - Docker (for Postgres + Redis), or local Postgres 16 with the `pgvector`
   extension and a Redis server
-- API keys: [Groq](https://console.groq.com), [NewsAPI](https://newsapi.org),
-  [Voyage AI](https://voyageai.com)
+- API keys: [Groq](https://console.groq.com), [NewsAPI](https://newsapi.org)
 
 ### 1. Configure environment
 ```bash
 cp .env.example .env   # then fill in your keys and DB/Redis settings
 ```
+
+Host-side `uv` against Docker Compose Postgres should use port **5455**
+(see `.env.example`). Inside containers, Postgres listens on 5432.
 
 ### 2. Start infrastructure
 ```bash
@@ -146,10 +144,8 @@ sanitization.
 | `POST` | `/analyze` | Kick off analysis for a ticker + question (async) |
 | `GET` | `/analyze/{task_id}` | Poll task status / result |
 | `GET` | `/reports/{ticker}` | Report history for a ticker |
-| `GET` | `/reports/{report_id}/pdf` | Export a report as PDF |
 | `GET` | `/companies` · `/stats` · `/sentiments` | Dashboard data |
-| `*` | `/watchlist`, `/alerts/*`, `/backtest/*` | Watchlist, alerting, backtesting |
-| `GET` | `/health` · `/schedule/status` | Ops / observability |
+| `GET` | `/health` | Ops / dependency health |
 
 ---
 
@@ -161,10 +157,9 @@ backend/
   ml/            earnings, anomaly, beneish, sentiment, peer clustering, forecaster
   rag/           chunking, embedding, retrieval, QA
   ingestion/     EDGAR / yfinance / NewsAPI clients + pipeline
-  backtesting/   historical report replay + performance analysis
   api/           FastAPI app, routes, schemas
-  tasks/         Celery app, analysis / scheduled / backtest tasks
-  core/          caching, alerts, rate limiting, logging, PDF export
+  tasks/         Celery app and analysis task
+  core/          logging, startup checks, Groq retry helper
   db/            SQLAlchemy models, CRUD, Alembic migrations
 frontend/        React + Vite dashboard
 tests/           pytest suite
