@@ -153,7 +153,6 @@ sanitization.
 
 ```
 backend/
-  agents/        supervisor · analyzer · synthesizer · prompts
   ml/            earnings, anomaly, beneish, sentiment, peer clustering, forecaster
   rag/           chunking, embedding, retrieval, QA
   ingestion/     EDGAR / yfinance / NewsAPI clients + pipeline
@@ -161,6 +160,7 @@ backend/
   tasks/         Celery app and analysis task
   core/          logging, startup checks, Groq retry helper
   db/            SQLAlchemy models, CRUD, Alembic migrations
+  (plus supervisor / analyzer / synthesizer / prompts packages)
 frontend/        React + Vite dashboard
 tests/           pytest suite
 ```
