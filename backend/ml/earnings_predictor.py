@@ -107,7 +107,7 @@ def compute_features(history: list[dict]) -> dict:
         else:
             break
 
-    return {
+    features = {
         "avg_surprise_3q": avg_surprise_3q,
         "avg_surprise_all": avg_surprise_all,
         "surprise_trend": surprise_trend,
@@ -115,6 +115,17 @@ def compute_features(history: list[dict]) -> dict:
         "estimate_accuracy": estimate_accuracy,
         "consecutive_beats": consecutive,
     }
+
+    # A single prior observation cannot support the full feature set
+    # (notably surprise_trend). Flag the row and backfill missing hard-
+    # minimum features to 0.0 so callers can still train with a sentinel.
+    if len(surprises) == 1:
+        features["_partial_features"] = True
+        for col in FEATURE_COLS:
+            if features[col] is None:
+                features[col] = 0.0
+
+    return features
 
 
 def load_earnings_dataset() -> pd.DataFrame:
