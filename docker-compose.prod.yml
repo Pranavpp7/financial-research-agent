@@ -126,26 +126,6 @@ services:
     logging: *default-logging
     networks: [fra-net]
 
-  # Celery beat scheduler. CRITICAL: run exactly ONE replica -- Celery beat
-  # is not multi-instance safe and multiple beats would double-fire every
-  # scheduled task. Do not scale this service.
-  beat:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    command: celery -A backend.tasks.celery_app beat --loglevel=info
-    depends_on:
-      redis:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-    restart: unless-stopped
-    env_file: .env.prod
-    mem_limit: 256m
-    cpus: 0.5
-    logging: *default-logging
-    networks: [fra-net]
-
   flower:
     build:
       context: .

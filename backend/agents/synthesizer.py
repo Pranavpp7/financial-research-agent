@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 from groq import Groq
 
 from backend.agents.prompts import SYNTHESIS_PROMPT
-from backend.core.rate_limiter import get_rate_limiter
+from backend.core.groq_retry import chat_completion_with_retry
 from backend.db.crud import save_report
 from backend.db.models import ReportCitation
 from backend.db.session import SessionLocal
@@ -55,8 +55,8 @@ class Synthesizer:
         # Call LLM in JSON mode
         logger.info("synthesis_start", ticker=ticker, n_analyses=len(analyses))
         try:
-            get_rate_limiter().acquire("groq")
-            response = self.client.chat.completions.create(
+            response = chat_completion_with_retry(
+                self.client,
                 model=self.model,
                 messages=[
                     {"role": "system", "content": SYNTHESIS_PROMPT},
@@ -116,13 +116,6 @@ class Synthesizer:
                 ))
             db.commit()
             report_data["report_id"] = report.id
-
-            # Fire risk-transition alerts (must never break the pipeline).
-            from backend.core.alerts import dispatch_alerts
-            try:
-                dispatch_alerts(db, report)
-            except Exception as e:
-                logger.error("alert_dispatch_failed", error=str(e), report_id=report.id)
         finally:
             db.close()
 

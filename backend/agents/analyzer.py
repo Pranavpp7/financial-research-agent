@@ -12,7 +12,7 @@ import structlog
 from dotenv import load_dotenv
 from groq import Groq
 
-from backend.core.rate_limiter import get_rate_limiter
+from backend.core.groq_retry import chat_completion_with_retry
 from backend.db.session import SessionLocal
 from backend.db.models import Earning, MLPrediction, NewsArticle
 from backend.agents.prompts import (
@@ -447,8 +447,8 @@ class Analyzer:
 
         logger.info("analysis_start", ticker=ticker, analysis=analysis_type)
         try:
-            get_rate_limiter().acquire("groq")
-            response = self.client.chat.completions.create(
+            response = chat_completion_with_retry(
+                self.client,
                 model=self.model,
                 messages=[
                     {"role": "system", "content": PROMPTS[analysis_type]},

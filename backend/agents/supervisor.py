@@ -13,6 +13,8 @@ import structlog
 from dotenv import load_dotenv
 from groq import Groq
 
+from backend.core.groq_retry import chat_completion_with_retry
+
 load_dotenv()
 
 logger = structlog.get_logger(__name__)
@@ -52,7 +54,8 @@ class Supervisor:
 
     def decide(self, ticker: str, question: str) -> list[str]:
         try:
-            response = self.client.chat.completions.create(
+            response = chat_completion_with_retry(
+                self.client,
                 model=self.model,
                 messages=[
                     {"role": "system", "content": SYSTEM},

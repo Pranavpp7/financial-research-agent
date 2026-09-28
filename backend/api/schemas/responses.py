@@ -25,8 +25,6 @@ class ReportResponse(BaseModel):
     sources: list | None = None
     forecast: dict | None = None   # revenue_forecaster shap_values
     peers: dict | None = None      # peer_clustering shap_values
-    from_cache: bool | None = None  # True if served from the report cache
-    age_minutes: int | None = None  # report age when served from cache
 
 
 class ReportHistoryItem(BaseModel):
@@ -41,20 +39,6 @@ class ReportHistoryItem(BaseModel):
     analyst_notes: str | None = None
 
 
-class WatchlistItem(BaseModel):
-    ticker: str
-    notes: str | None = None
-    created_at: datetime | None = None
-
-
-class WatchlistSummaryItem(BaseModel):
-    ticker: str
-    notes: str | None = None
-    risk_level: str | None = None
-    confidence_score: float | None = None
-    last_analyzed: datetime | None = None
-
-
 class TaskStatusResponse(BaseModel):
     task_id: str
     status: str = Field(
@@ -66,6 +50,3 @@ class TaskStatusResponse(BaseModel):
     stage: str | None = None
     message: str | None = None
     pct: int | None = None
-    # Populated when error == "rate_limit_exceeded".
-    service: str | None = None
-    retry_after_seconds: int | None = None

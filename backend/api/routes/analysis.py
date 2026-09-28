@@ -1,10 +1,8 @@
 """Routes: submit analyses, poll status, fetch saved reports, list companies."""
-import io
 from datetime import datetime, timezone
 
 from celery.result import AsyncResult
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import StreamingResponse
 from sqlalchemy import func
 
 from backend.api.schemas.requests import AnalysisRequest
@@ -132,9 +130,7 @@ def _build_report_response(report: Report, company: Company) -> ReportResponse:
 @router.post("/analyze", response_model=TaskResponse)
 def submit_analysis(request: AnalysisRequest) -> TaskResponse:
     """Queue an analysis. Returns a task_id to poll."""
-    task = run_analysis_task.delay(
-        request.ticker, request.question, request.force_refresh
-    )
+    task = run_analysis_task.delay(request.ticker, request.question)
     _mark_task_submitted(task.id)
     return TaskResponse(
         task_id=task.id,
@@ -181,17 +177,6 @@ def get_task_status(task_id: str) -> TaskStatusResponse:
 
     task_payload = async_result.result or {}
     if "error" in task_payload:
-        # Rate-limit errors carry extra fields the frontend uses for its
-        # countdown banner.
-        if task_payload["error"] == "rate_limit_exceeded":
-            return TaskStatusResponse(
-                task_id=task_id,
-                status="failed",
-                error="rate_limit_exceeded",
-                service=task_payload.get("service"),
-                retry_after_seconds=task_payload.get("retry_after_seconds"),
-                message=task_payload.get("message"),
-            )
         return TaskStatusResponse(
             task_id=task_id, status="failed", error=task_payload["error"],
         )
@@ -211,9 +196,6 @@ def get_task_status(task_id: str) -> TaskStatusResponse:
                 )
                 if company:
                     report_resp = _build_report_response(report, company)
-                    # Surface cache provenance from the task payload.
-                    report_resp.from_cache = bool(task_payload.get("from_cache"))
-                    report_resp.age_minutes = task_payload.get("age_minutes")
         finally:
             db.close()
 
@@ -258,50 +240,6 @@ def get_report_history(ticker: str) -> list[ReportHistoryItem]:
                 analyst_notes=r.analyst_notes,
             ))
         return items
-    finally:
-        db.close()
-
-
-@router.get("/reports/{report_id}/pdf")
-def export_report_pdf(report_id: int):
-    """Render a saved report as a downloadable PDF."""
-    # Imported lazily on purpose: pdf_export pulls in WeasyPrint, which needs
-    # native cairo/pango libs. Keeping it out of module scope means the rest of
-    # the API still imports and runs on hosts without those system libraries.
-    from backend.core.pdf_export import render_report_pdf
-
-    db = SessionLocal()
-    try:
-        report = db.query(Report).filter(Report.id == report_id).first()
-        if not report:
-            raise HTTPException(status_code=404, detail=f"report {report_id} not found")
-        company = db.query(Company).filter(Company.id == report.company_id).first()
-        if not company:
-            raise HTTPException(status_code=404, detail="company not found")
-        ml_predictions = (
-            db.query(MLPrediction)
-            .filter(MLPrediction.company_id == company.id)
-            .order_by(MLPrediction.run_date.desc())
-            .all()
-        )
-        try:
-            pdf_bytes = render_report_pdf(report, company, ml_predictions)
-        except Exception as e:
-            # WeasyPrint native libs may be missing in some environments.
-            raise HTTPException(status_code=500, detail=f"PDF render failed: {e}")
-
-        date_str = (
-            report.generated_at.strftime("%Y%m%d") if report.generated_at else "report"
-        )
-        filename = f"{company.ticker}_{date_str}.pdf"
-        return StreamingResponse(
-            io.BytesIO(pdf_bytes),
-            media_type="application/pdf",
-            headers={
-                "Content-Disposition": f'attachment; filename="{filename}"',
-                "Cache-Control": "private, max-age=3600",
-            },
-        )
     finally:
         db.close()
 
