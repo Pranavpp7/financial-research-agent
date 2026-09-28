@@ -3,13 +3,17 @@ RAG Q&A: retrieve top-k chunks, format as context, ask Groq Llama 3.3 70B.
 """
 import os
 
+import structlog
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
 
+from backend.core.rate_limiter import get_rate_limiter
 from backend.rag.retriever import search
 
 load_dotenv()
+
+logger = structlog.get_logger(__name__)
 
 
 SYSTEM_PROMPT = (
@@ -43,6 +47,7 @@ def answer(question: str, k: int = 6, ticker: str | None = "AAPL") -> dict:
     context = "\n\n".join(context_blocks)
 
     llm = ChatGroq(model=GROQ_MODEL, temperature=0.0, api_key=api_key)
+    get_rate_limiter().acquire("groq")
     response = llm.invoke([
         SystemMessage(content=SYSTEM_PROMPT),
         HumanMessage(content=f"Context:\n{context}\n\nQuestion: {question}"),

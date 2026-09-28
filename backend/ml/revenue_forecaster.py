@@ -1,7 +1,13 @@
 """
 Revenue Forecaster v2 -- median quarter-over-quarter growth rate.
 
-For each company with >= 4 quarters of non-null revenue:
+NOTE: the platform refers to this as the "Prophet revenue forecaster", but
+this engine deliberately uses median QoQ growth instead of Prophet (Prophet
+over-parameterizes on short quarterly series). It emits the same prediction
+schema the analyzer/frontend expect; `seasonality_strength` is reported as
+0.0 because this model has no seasonality component.
+
+For each company with >= 6 quarters of non-null revenue:
   1. Compute QoQ growth rates from the full series.
   2. Forecast next quarter = last revenue * (1 + median growth).
   3. +/- 1 stdev of growth rates for the interval.
@@ -16,6 +22,7 @@ import math
 import numpy as np
 import pandas as pd
 import mlflow
+import structlog
 from dotenv import load_dotenv
 
 from backend.db.session import SessionLocal
@@ -25,8 +32,12 @@ from backend.ingestion.pipeline import safe_float
 
 load_dotenv()
 
+logger = structlog.get_logger(__name__)
 
-MIN_QUARTERS = 4
+# Forecasting needs at least this many quarters of revenue. Companies with
+# fewer get a cold-start sentinel ml_predictions row (status =
+# "insufficient_data") so the analyzer/frontend can explain the gap.
+MIN_QUARTERS = 6
 
 
 def _build_company_series(db, company: Company) -> pd.DataFrame | None:
@@ -51,6 +62,20 @@ def _build_company_series(db, company: Company) -> pd.DataFrame | None:
     df = pd.DataFrame(rows)
     df["ds"] = pd.to_datetime(df["ds"])
     return df
+
+
+def _count_revenue_quarters(db, company: Company) -> int:
+    """How many quarters of positive, non-null revenue this company has."""
+    earnings = (
+        db.query(Earning)
+        .filter(
+            Earning.company_id == company.id,
+            Earning.revenue.isnot(None),
+            Earning.report_date.isnot(None),
+        )
+        .all()
+    )
+    return sum(1 for e in earnings if e.revenue is not None and e.revenue > 0)
 
 
 def _growth_rates(revenues: list[float]) -> list[float]:
@@ -97,6 +122,28 @@ def forecast_company(df: pd.DataFrame) -> dict:
     lower_bound = last_revenue * (1 + median_growth - growth_std)
     upper_bound = last_revenue * (1 + median_growth + growth_std)
 
+    # Two-quarter-ahead forecast: apply the median growth a second time.
+    forecast_2q = forecast_revenue * (1 + median_growth)
+
+    # Trend label from the median growth rate (0.5% deadband around flat).
+    if median_growth > 0.005:
+        trend_direction = "up"
+    elif median_growth < -0.005:
+        trend_direction = "down"
+    else:
+        trend_direction = "flat"
+
+    # Confidence from the relative interval width: narrower band => more
+    # confident. width = (upper - lower) / forecast, inverted and clamped.
+    if forecast_revenue:
+        width = (upper_bound - lower_bound) / abs(forecast_revenue)
+    else:
+        width = 1.0
+    confidence = max(0.0, min(1.0, 1.0 - width))
+
+    # Median-QoQ-growth has no seasonality component (see module docstring).
+    seasonality_strength = 0.0
+
     next_ds = last_ds + pd.DateOffset(months=3)
 
     return {
@@ -106,6 +153,10 @@ def forecast_company(df: pd.DataFrame) -> dict:
         "forecast_ds": next_ds,
         "forecast_quarter": _quarter_string(next_ds),
         "forecast_revenue": float(forecast_revenue),
+        "forecast_2q": float(forecast_2q),
+        "trend_direction": trend_direction,
+        "seasonality_strength": seasonality_strength,
+        "confidence": confidence,
         "lower_bound": float(lower_bound),
         "upper_bound": float(upper_bound),
         "mape": float(mape),
@@ -114,22 +165,58 @@ def forecast_company(df: pd.DataFrame) -> dict:
     }
 
 
+def _persist_sentinels(insufficient: list[tuple[Company, int]]) -> int:
+    """Write a cold-start sentinel row for each under-covered company."""
+    db = SessionLocal()
+    saved = 0
+    try:
+        for company, n in insufficient:
+            logger.warning(
+                "cold-start: %s has %d revenue quarters, need %d",
+                company.ticker, n, MIN_QUARTERS,
+            )
+            save_ml_prediction(db, company.id, {
+                "model_name": "revenue_forecaster",
+                "prediction": None,
+                "confidence": None,
+                "shap_values": {
+                    "status": "insufficient_data",
+                    "quarters_available": n,
+                    "quarters_required": MIN_QUARTERS,
+                },
+                "features_used": {},
+            })
+            saved += 1
+    finally:
+        db.close()
+    return saved
+
+
 def main():
     print("Loading companies and revenue history from PostgreSQL...")
     db = SessionLocal()
     try:
         series_by_company = {}
+        insufficient = []  # (company, n_quarters) -> cold-start sentinels
         for company in db.query(Company).all():
             series = _build_company_series(db, company)
             if series is not None:
                 series_by_company[company.id] = (company, series)
+            else:
+                insufficient.append((company, _count_revenue_quarters(db, company)))
     finally:
         db.close()
 
     eligible = len(series_by_company)
     print(f"  {eligible} companies have >= {MIN_QUARTERS} quarters of revenue data")
+    print(f"  {len(insufficient)} companies below the minimum (cold-start sentinels)")
+
+    # Even with nothing to forecast we still persist sentinels so the
+    # analyzer can explain the gap for under-covered tickers.
     if eligible == 0:
-        print("Nothing to forecast. Run the ingestion pipeline first.")
+        if insufficient:
+            _persist_sentinels(insufficient)
+        print("No companies have enough revenue history to forecast.")
         return
 
     print("Forecasting via median QoQ growth rate...")
@@ -179,31 +266,33 @@ def main():
     saved = 0
     try:
         for r in results:
-            mape = r["mape"] if math.isfinite(r["mape"]) else 1.0
-            confidence = max(0.0, min(1.0, 1.0 - mape))
             save_ml_prediction(db, r["company_id"], {
                 "model_name": "revenue_forecaster",
                 "prediction": safe_float(r["forecast_revenue"]),
-                "confidence": safe_float(confidence),
+                "confidence": safe_float(r["confidence"]),
                 "shap_values": {
-                    "forecast_quarter": r["forecast_quarter"],
-                    "forecast_revenue": safe_float(r["forecast_revenue"]),
-                    "lower_bound": safe_float(r["lower_bound"]),
-                    "upper_bound": safe_float(r["upper_bound"]),
-                    "median_growth_rate": safe_float(r["median_growth_rate"]),
-                    "mape": safe_float(r["mape"]),
-                    "quarters_used": r["quarters_used"],
+                    "forecast_next_q": safe_float(r["forecast_revenue"]),
+                    "forecast_2q": safe_float(r["forecast_2q"]),
+                    "trend_direction": r["trend_direction"],
+                    "seasonality_strength": safe_float(r["seasonality_strength"]),
+                    "periods_used": r["quarters_used"],
+                    # Bounds (additive beyond the base schema) so the frontend
+                    # can render an uncertainty +/- range.
+                    "forecast_low": safe_float(r["lower_bound"]),
+                    "forecast_high": safe_float(r["upper_bound"]),
                 },
                 "features_used": {
-                    "ticker": r["ticker"],
-                    "last_actual_revenue": safe_float(r["last_actual_revenue"]),
-                    "last_quarter_ds": str(r["last_quarter_ds"].date()),
-                    "growth_std": safe_float(r["growth_std"]),
+                    "last_revenue": safe_float(r["last_actual_revenue"]),
+                    "quarters_of_data": r["quarters_used"],
                 },
             })
             saved += 1
     finally:
         db.close()
+
+    # Cold-start sentinels for companies below the minimum.
+    if insufficient:
+        saved += _persist_sentinels(insufficient)
 
     # ── Summary ─────────────────────────────────────
     print(f"\n{'='*108}")
@@ -230,8 +319,7 @@ def main():
         f"{'-'*8}  {'-'*7}  {'-'*6}"
     )
     for r in sorted(results, key=lambda x: x["mape"]):
-        mape = r["mape"] if math.isfinite(r["mape"]) else 1.0
-        confidence = max(0.0, min(1.0, 1.0 - mape))
+        confidence = r["confidence"]
         print(
             f"  {r['ticker']:<8} {r['forecast_quarter']:<10} "
             f"${r['last_actual_revenue']:>17,.0f}  "

@@ -153,6 +153,35 @@ sanitization.
 
 ---
 
+## Known limitations
+
+Deliberately scoped as a portfolio project, not a trading system. The honest
+caveats:
+
+- **Backtesting is illustrative, not statistically significant.** Reports
+  cluster around when ingestion ran (not uniform intervals), per-ticker sample
+  sizes are small, the bull/bear "signal" is a coarse heuristic, forward
+  windows are calendar (not trading) days, and returns are gross — no costs,
+  slippage, or lookahead-bias guard. See the methodology note in
+  [`backtesting/engine.py`](backend/backtesting/engine.py).
+- **Not investment advice.** Outputs are LLM-synthesized and can be wrong; the
+  report layer surfaces a confidence score and data-quality signal precisely
+  because individual claims should be verified against the cited sources.
+- **Single-tenant.** No auth/multi-user yet — the watchlist and alert
+  subscriptions are effectively one global list.
+- **Report cache invalidation is manual.** `AGENT_VERSION` in
+  [`core/cache.py`](backend/core/cache.py) must be bumped when prompts or agent
+  logic change, or cached reports for an unchanged (ticker, question) are
+  reused within the TTL.
+- **Rate limiter fails open.** If Redis is unreachable the limiter logs and
+  allows the call rather than blocking the pipeline — favouring availability
+  over strict quota enforcement.
+- **Cold-start tickers.** Companies with too little history get an explicit
+  `insufficient_data` sentinel (earnings needs ≥4 quarters, revenue ≥6) rather
+  than a fabricated prediction; run more ingestion to graduate them.
+
+---
+
 ## Project layout
 
 ```

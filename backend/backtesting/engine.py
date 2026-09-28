@@ -23,14 +23,13 @@ into backtest_runs.summary.
   - Per-ticker sample sizes are usually small (<10). Results are
     illustrative, not statistically significant.
 """
-from datetime import datetime, timezone
 from typing import Callable, Optional
 
 import structlog
 
 from backend.backtesting.prices import get_forward_return, get_price_on
 from backend.backtesting.signals import report_to_signal
-from backend.db.models import BacktestResult, BacktestRun, Company, Report
+from backend.db.models import BacktestResult, BacktestRun, Company, Report, utcnow
 from backend.db.session import SessionLocal
 
 logger = structlog.get_logger(__name__)
@@ -87,7 +86,7 @@ def run_backtest(
     db = SessionLocal()
     run = BacktestRun(
         name=name,
-        created_at=datetime.now(timezone.utc),
+        created_at=utcnow(),
         parameters={
             "ticker_filter": ticker_filter,
             "min_confidence": min_confidence,

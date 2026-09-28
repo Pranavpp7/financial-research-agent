@@ -80,6 +80,12 @@ def process_filing(filing_id: int) -> dict:
         if (db.query(FilingChunk)
                 .filter(FilingChunk.filing_id == filing_id)
                 .first()):
+            # Repair the flag so this filing stops being re-queried every
+            # run (chunks present but is_embedded=0 can only mean an
+            # inconsistent state from older runs or manual edits).
+            if not filing.is_embedded:
+                filing.is_embedded = 1
+                db.commit()
             return {"skipped": True, "reason": "already chunked"}
 
         print(f"  loading HTML via UnstructuredHTMLLoader ({len(filing.raw_text):,} chars)...")

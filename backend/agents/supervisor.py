@@ -13,6 +13,8 @@ import structlog
 from dotenv import load_dotenv
 from groq import Groq
 
+from backend.core.rate_limiter import get_rate_limiter
+
 load_dotenv()
 
 logger = structlog.get_logger(__name__)
@@ -51,6 +53,11 @@ class Supervisor:
         self.model = model
 
     def decide(self, ticker: str, question: str) -> list[str]:
+        # Acquire OUTSIDE the try — this was the one Groq call site with no
+        # rate limiting at all. Kept out of the except-fallback on purpose:
+        # falling back to ALL five analyses on a rate-limit error would make
+        # the overload worse; propagating lets the Celery task retry instead.
+        get_rate_limiter().acquire("groq")
         try:
             response = self.client.chat.completions.create(
                 model=self.model,

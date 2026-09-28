@@ -28,3 +28,6 @@ mlflow.db
 Thumbs.db
 .idea/
 .vscode/
+
+.claude/
+dump.rdb

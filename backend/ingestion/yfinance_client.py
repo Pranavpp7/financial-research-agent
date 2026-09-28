@@ -18,6 +18,7 @@ def get_company_overview(ticker: str) -> dict:
             "name": info.get("longName"),
             "sector": info.get("sector"),
             "industry": info.get("industry"),
+            "exchange": info.get("exchange"),
             "market_cap": info.get("marketCap"),
             "pe_ratio": info.get("trailingPE"),
             "52w_high": info.get("fiftyTwoWeekHigh"),

@@ -11,9 +11,9 @@ Trigger logic (called after each new report is saved):
 All external calls (SMTP, Slack webhook) have timeouts and never raise
 out of dispatch_alerts -- alert failures must not break the agent pipeline.
 """
+import html
 import os
 import smtplib
-from datetime import datetime, timezone
 from email.message import EmailMessage
 from typing import Optional
 
@@ -27,6 +27,7 @@ from backend.db.models import (
     Company,
     Report,
     ReportCitation,
+    utcnow,
 )
 
 logger = structlog.get_logger(__name__)
@@ -128,7 +129,10 @@ def build_email(
     new_risk = (new.risk_level or "unknown").lower()
     prev_risk = (prev.risk_level or "n/a").lower() if prev else "n/a"
     conf = new.confidence_score if new.confidence_score is not None else 0.0
-    findings_html = "".join(f"<li>{f}</li>" for f in findings) or "<li>(none)</li>"
+    # Findings are LLM-generated text — escape before interpolating into HTML.
+    findings_html = (
+        "".join(f"<li>{html.escape(f)}</li>" for f in findings) or "<li>(none)</li>"
+    )
     subject = f"⚠ {ticker}: Risk level changed to {new_risk}"
     html = f"""\
 <html><body style="font-family:Inter,system-ui,sans-serif;background:#0a0a0f;color:#f1f5f9;padding:24px">
@@ -221,7 +225,7 @@ def dispatch_alerts(db: Session, new_report: Report) -> list[AlertHistory]:
 
         row = AlertHistory(
             subscription_id=sub.id,
-            fired_at=datetime.now(timezone.utc),
+            fired_at=utcnow(),
             trigger_type=",".join(matching),
             report_id_before=prev.id if prev else None,
             report_id_after=new_report.id,
@@ -230,7 +234,7 @@ def dispatch_alerts(db: Session, new_report: Report) -> list[AlertHistory]:
             delivery_error=err,
         )
         db.add(row)
-        sub.last_fired_at = datetime.now(timezone.utc)
+        sub.last_fired_at = utcnow()
         history.append(row)
         logger.info(
             "alert_dispatched", ticker=ticker, channel=sub.channel,

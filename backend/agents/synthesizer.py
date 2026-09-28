@@ -54,8 +54,11 @@ class Synthesizer:
 
         # Call LLM in JSON mode
         logger.info("synthesis_start", ticker=ticker, n_analyses=len(analyses))
+        # Acquire OUTSIDE the try: RateLimitExceeded must propagate to the
+        # Celery task's retry handler; the generic except below would turn
+        # it into a plain error report instead.
+        get_rate_limiter().acquire("groq")
         try:
-            get_rate_limiter().acquire("groq")
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[

@@ -1,6 +1,7 @@
-import logging
 import os
 from datetime import datetime
+
+import structlog
 from dotenv import load_dotenv
 from backend.db.session import SessionLocal
 from backend.db.crud import (
@@ -10,7 +11,11 @@ from backend.db.crud import (
     save_news_article,
     get_company
 )
-from backend.ingestion.edgar_client import get_company_info, get_recent_filings
+from backend.ingestion.edgar_client import (
+    fetch_filing_html,
+    get_company_info,
+    get_recent_filings,
+)
 from backend.ingestion.yfinance_client import (
     get_company_overview,
     get_earnings_history,
@@ -18,10 +23,11 @@ from backend.ingestion.yfinance_client import (
     get_key_financial_ratios,
 )
 from backend.ingestion.news_client import get_company_news
+from backend.core.rate_limiter import get_rate_limiter
 
 load_dotenv()
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 def safe_float(value):
@@ -67,7 +73,8 @@ def get_cik_for_ticker(ticker: str) -> str:
 
     try:
         tickers_url = "https://www.sec.gov/files/company_tickers.json"
-        response = requests.get(tickers_url, headers=headers)
+        response = requests.get(tickers_url, headers=headers, timeout=30)
+        response.raise_for_status()
         data = response.json()
 
         for key, company in data.items():
@@ -105,6 +112,7 @@ def run_ingestion_pipeline(ticker: str) -> dict:
         "earnings_saved": 0,
         "ratios_matched": 0,
         "filings_saved": 0,
+        "filings_fetched": 0,
         "articles_saved": 0,
         "errors": []
     }
@@ -190,18 +198,45 @@ def run_ingestion_pipeline(ticker: str) -> dict:
                         "accession": filing.get("accession"),
                         "raw_text": ""
                     }
-                    save_filing(db, company.id, filing_data)
+                    row = save_filing(db, company.id, filing_data)
                     results["filings_saved"] += 1
 
-        print(f"Saved {results['filings_saved']} filing records\n")
+                    # Fetch the primary-document HTML so the embedder can
+                    # chunk it — without raw_text the filing can never enter
+                    # the RAG index. Skipped when already fetched (dedupe on
+                    # accession returns the existing row).
+                    if row is not None and not row.raw_text:
+                        html = fetch_filing_html(filing.get("accession"), cik)
+                        if html:
+                            row.raw_text = html
+                            db.commit()
+                            results["filings_fetched"] += 1
+                        else:
+                            logger.warning(
+                                "filing_html_fetch_failed",
+                                ticker=ticker,
+                                accession=filing.get("accession"),
+                            )
+
+        print(
+            f"Saved {results['filings_saved']} filing records "
+            f"({results['filings_fetched']} with document HTML fetched)\n"
+        )
 
         # ── STEP 4: Fetch and save news articles ────────────
         print("Step 4: Fetching news articles...")
 
+        # Respect the NewsAPI daily quota (cross-process, Redis-backed).
+        limiter = get_rate_limiter()
+        limiter.acquire("newsapi")
         articles = get_company_news(
             company_data.get("name", ticker),
             ticker,
             days_back=30
+        )
+        logger.info(
+            "newsapi_quota_remaining",
+            ticker=ticker, remaining=limiter.get_remaining("newsapi"),
         )
 
         for article in articles:
@@ -226,7 +261,7 @@ def run_ingestion_pipeline(ticker: str) -> dict:
     print(f"  Company ID:      {results['company_id']}")
     print(f"  Earnings saved:  {results['earnings_saved']}")
     print(f"  Ratios matched:  {results['ratios_matched']}")
-    print(f"  Filings saved:   {results['filings_saved']}")
+    print(f"  Filings saved:   {results['filings_saved']} ({results['filings_fetched']} HTML fetched)")
     print(f"  Articles saved:  {results['articles_saved']}")
     if results["errors"]:
         print(f"  Errors:          {results['errors']}")
