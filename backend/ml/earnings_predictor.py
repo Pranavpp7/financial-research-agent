@@ -10,6 +10,7 @@ import os
 
 import numpy as np
 import pandas as pd
+import structlog
 import xgboost as xgb
 import shap
 import mlflow
@@ -29,6 +30,13 @@ from backend.db.crud import save_ml_prediction
 from backend.ingestion.pipeline import safe_float
 
 load_dotenv()
+
+logger = structlog.get_logger(__name__)
+
+# Minimum quarters of usable earnings history before XGBoost can engineer
+# features and make a prediction. Below this we write a sentinel row so the
+# analyzer can explain the gap instead of silently skipping the company.
+MIN_QUARTERS_REQUIRED = 4
 
 
 FEATURE_COLS = [
@@ -75,6 +83,20 @@ def compute_features(history: list[dict]) -> dict:
     Build features from a list of PRIOR earnings rows
     (sorted oldest -> newest). No leakage: caller must exclude
     the target quarter from `history`.
+
+    Graceful degradation: with >= 1 but < 2 surprise observations, the
+    features that CAN be computed are kept and the rest are filled with
+    0.0, and the returned dict carries `_partial_features=True` so callers
+    can decide whether to trust/skip the row.
+
+    Which features degrade gracefully vs. require a hard minimum:
+      - avg_surprise_all   : graceful  (needs >= 1 surprise)
+      - avg_surprise_3q    : graceful  (needs >= 1 surprise)
+      - beat_rate          : graceful  (needs >= 1 actual/estimate pair)
+      - estimate_accuracy  : graceful  (needs >= 1 actual/estimate pair)
+      - consecutive_beats  : graceful  (defaults to 0 with no beats)
+      - surprise_trend     : HARD MINIMUM of 4 surprises; filled with 0.0
+                             and flagged when unavailable.
     """
     surprises, beats, abs_errors = [], [], []
     for row in history:
@@ -107,7 +129,7 @@ def compute_features(history: list[dict]) -> dict:
         else:
             break
 
-    return {
+    features = {
         "avg_surprise_3q": avg_surprise_3q,
         "avg_surprise_all": avg_surprise_all,
         "surprise_trend": surprise_trend,
@@ -115,6 +137,17 @@ def compute_features(history: list[dict]) -> dict:
         "estimate_accuracy": estimate_accuracy,
         "consecutive_beats": consecutive,
     }
+
+    # Partial-data mode: with exactly 1 surprise observation, keep what we
+    # have and fill the hard-minimum features (surprise_trend) with 0.0 so
+    # the row is usable, while flagging it for callers that want clean rows.
+    if 1 <= len(surprises) < 2:
+        for col in FEATURE_COLS:
+            if features[col] is None:
+                features[col] = 0.0
+        features["_partial_features"] = True
+
+    return features
 
 
 def load_earnings_dataset() -> pd.DataFrame:
@@ -146,6 +179,10 @@ def load_earnings_dataset() -> pd.DataFrame:
                     continue
 
                 features = compute_features(history[:i])
+                # Skip incomplete rows AND partial (degraded) rows -- training
+                # should only learn from quarters with full feature support.
+                if features.get("_partial_features"):
+                    continue
                 if any(features[c] is None for c in FEATURE_COLS):
                     continue
 
@@ -233,6 +270,34 @@ def predict_and_persist(model) -> int:
                 .all()
             )
             history = [_earning_to_dict(e) for e in earnings]
+
+            # Cold-start: a "usable" quarter has both EPS actual and estimate
+            # (the inputs feature engineering depends on). Below the minimum,
+            # write a sentinel ml_predictions row instead of skipping silently
+            # so the analyzer always finds a row and can state the reason.
+            usable = [
+                h for h in history
+                if h["eps_actual"] is not None and h["eps_estimate"] is not None
+            ]
+            if len(usable) < MIN_QUARTERS_REQUIRED:
+                logger.warning(
+                    "cold-start: %s has %d quarters, need %d",
+                    company.ticker, len(usable), MIN_QUARTERS_REQUIRED,
+                )
+                save_ml_prediction(db, company.id, {
+                    "model_name": "earnings_surprise_predictor",
+                    "prediction": None,
+                    "confidence": None,
+                    "shap_values": {
+                        "status": "insufficient_data",
+                        "quarters_available": len(usable),
+                        "quarters_required": MIN_QUARTERS_REQUIRED,
+                    },
+                    "features_used": {},
+                })
+                saved += 1
+                continue
+
             features = compute_features(history)
             if any(features[c] is None for c in FEATURE_COLS):
                 continue

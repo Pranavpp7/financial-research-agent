@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import mlflow
 import mlflow.sklearn
+import structlog
 from dotenv import load_dotenv
 from sklearn.cluster import DBSCAN, KMeans
 from sklearn.metrics import silhouette_samples, silhouette_score
@@ -21,6 +22,33 @@ from backend.db.crud import save_ml_prediction
 from backend.ingestion.pipeline import safe_float
 
 load_dotenv()
+
+logger = structlog.get_logger(__name__)
+
+PEER_TICKERS_LIMIT = 5
+
+
+def _cluster_label(cluster_means: dict, global_medians: dict) -> str:
+    """
+    Heuristic human-readable label for a cluster, derived by comparing the
+    cluster's mean feature values to the dataset-wide medians. Best-effort:
+    intended for analyst context, not a rigorous taxonomy.
+    """
+    parts = []
+    if cluster_means["log_revenue"] >= global_medians["log_revenue"]:
+        parts.append("large-cap")
+    else:
+        parts.append("small/mid-cap")
+    if cluster_means["operating_margin"] >= global_medians["operating_margin"]:
+        parts.append("high-margin")
+    if (
+        cluster_means["avg_surprise_pct"] >= global_medians["avg_surprise_pct"]
+        and cluster_means["beat_rate"] >= global_medians["beat_rate"]
+    ):
+        parts.append("high-growth")
+    elif cluster_means["beat_rate"] < global_medians["beat_rate"]:
+        parts.append("steady/value")
+    return " ".join(parts) if parts else "mixed"
 
 
 FEATURE_COLS = [
@@ -151,18 +179,42 @@ def main():
         mlflow.log_metric("dbscan_noise_points", n_noise)
         mlflow.sklearn.log_model(kmeans, "kmeans")
 
+    # ── Precompute per-cluster stats for shap_values enrichment ──
+    global_medians = {col: float(df[col].median()) for col in FEATURE_COLS}
+    cluster_sizes = df.groupby("kmeans_cluster").size().to_dict()
+    cluster_tickers = (
+        df.groupby("kmeans_cluster")["ticker"].apply(list).to_dict()
+    )
+    cluster_label_by_id = {}
+    for cid in df["kmeans_cluster"].unique():
+        members = df[df["kmeans_cluster"] == cid]
+        cluster_means = {col: float(members[col].mean()) for col in FEATURE_COLS}
+        cluster_label_by_id[int(cid)] = _cluster_label(cluster_means, global_medians)
+
     # ── Persist KMeans assignments ──────────────────
     print("Persisting KMeans cluster assignments to ml_predictions...")
     db = SessionLocal()
     saved = 0
     try:
         for _, row in df.iterrows():
+            cid = int(row["kmeans_cluster"])
             feature_values = {col: safe_float(row[col]) for col in FEATURE_COLS}
+            # Up to N same-cluster peers, excluding the company itself.
+            peers = [t for t in cluster_tickers.get(cid, []) if t != row["ticker"]]
             save_ml_prediction(db, int(row["company_id"]), {
                 "model_name": "peer_clustering",
-                "prediction": float(row["kmeans_cluster"]),
+                "prediction": float(cid),
                 "confidence": safe_float(row["silhouette"]),
-                "shap_values": feature_values,
+                "shap_values": {
+                    "cluster_id": cid,
+                    "cluster_size": int(cluster_sizes.get(cid, 0)),
+                    "peer_tickers": peers[:PEER_TICKERS_LIMIT],
+                    "cluster_label": cluster_label_by_id.get(cid, "mixed"),
+                    # Additive: surface the fit score so the frontend can
+                    # render a silhouette progress bar (also stored as the
+                    # row's confidence).
+                    "silhouette": safe_float(row["silhouette"]),
+                },
                 "features_used": feature_values,
             })
             saved += 1

@@ -13,13 +13,13 @@ AGENT_VERSION is bumped manually when prompts or agent logic change.
 """
 import hashlib
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from typing import Optional
 
 import structlog
 from sqlalchemy.orm import Session
 
-from backend.db.models import Report, ReportCitation
+from backend.db.models import Report, ReportCitation, utcnow
 
 logger = structlog.get_logger(__name__)
 
@@ -57,7 +57,9 @@ def find_fresh_report(
     Backed by ix_reports_cache_key_created_at.
     """
     key = make_cache_key(ticker, question)
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)
+    # Naive UTC to match generated_at (TIMESTAMP WITHOUT TIME ZONE) — an
+    # aware cutoff would be converted via the Postgres session timezone.
+    cutoff = utcnow() - timedelta(minutes=max_age_minutes)
     report = (
         db.query(Report)
         .filter(Report.cache_key == key)

@@ -30,21 +30,40 @@ interface Props {
   ticker: string;
   question: string;
   loading: boolean;
+  progress?: { pct: number; message: string } | null;
+  rateLimit?: { service: string; retryAfter: number } | null;
   onTickerChange: (t: string) => void;
   onQuestionChange: (q: string) => void;
   onSubmit: () => void;
   error: string | null;
 }
 
+// Counts down from an initial seconds value; resets when it changes.
+function useCountdown(initial: number | null): number {
+  const [secs, setSecs] = useState(initial ?? 0);
+  useEffect(() => {
+    if (initial === null) return;
+    setSecs(initial);
+    const id = window.setInterval(() => {
+      setSecs((s) => (s > 0 ? s - 1 : 0));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [initial]);
+  return secs;
+}
+
 export default function SearchPanel({
   ticker,
   question,
   loading,
+  progress,
+  rateLimit,
   onTickerChange,
   onQuestionChange,
   onSubmit,
   error,
 }: Props) {
+  const countdown = useCountdown(rateLimit ? rateLimit.retryAfter : null);
   // Cycle through loading phases.
   const [phaseIdx, setPhaseIdx] = useState(0);
   useEffect(() => {
@@ -117,8 +136,8 @@ export default function SearchPanel({
               <>
                 <Sparkles size={14} className="text-cyan-400 animate-pulse" />
                 <span className="text-slate-300 font-mono">
-                  {typed}
-                  <span className="caret">▍</span>
+                  {progress ? progress.message : typed}
+                  {!progress && <span className="caret">▍</span>}
                 </span>
               </>
             ) : (
@@ -145,6 +164,31 @@ export default function SearchPanel({
             {loading ? "Analyzing..." : "Analyze →"}
           </button>
         </div>
+
+        {loading && progress && (
+          <div className="flex flex-col gap-1">
+            <div className="h-1.5 w-full rounded-full bg-[--color-bg-base] overflow-hidden">
+              <div
+                className="h-1.5 rounded-full bg-gradient-to-r from-indigo-500 to-cyan-400 transition-all duration-500"
+                style={{ width: `${Math.max(0, Math.min(100, progress.pct))}%` }}
+              />
+            </div>
+            <div className="flex justify-between text-[10px] text-slate-500 font-mono">
+              <span>{progress.message}</span>
+              <span>{Math.round(progress.pct)}%</span>
+            </div>
+          </div>
+        )}
+
+        {rateLimit && (
+          <motion.p
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="text-sm text-amber-300 border border-amber-500/30 bg-amber-500/10 rounded-lg px-3 py-2"
+          >
+            ⏳ Rate limit reached for {rateLimit.service}. Retrying in {countdown}s...
+          </motion.p>
+        )}
 
         {error && (
           <motion.p

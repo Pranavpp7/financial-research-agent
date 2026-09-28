@@ -6,7 +6,8 @@ from sqlalchemy.dialects.postgresql import insert
 from backend.db.models import (
     Company, Filing, Earning,
     NewsArticle, MLPrediction, Report,
-    ReportCitation, AgentRun, EvalScore
+    ReportCitation, AgentRun, EvalScore,
+    utcnow,
 )
 
 logger = logging.getLogger(__name__)
@@ -29,7 +30,7 @@ def get_or_create_company(db: Session, ticker: str, data: dict) -> Company:
         company.industry = data.get("industry", company.industry)
         company.exchange = data.get("exchange", company.exchange)
         company.cik = data.get("cik", company.cik)
-        company.last_analyzed = datetime.utcnow()
+        company.last_analyzed = utcnow()
         db.commit()
         db.refresh(company)
         print(f"Updated company: {ticker}")
@@ -42,7 +43,7 @@ def get_or_create_company(db: Session, ticker: str, data: dict) -> Company:
             industry=data.get("industry"),
             exchange=data.get("exchange"),
             cik=data.get("cik"),
-            last_analyzed=datetime.utcnow()
+            last_analyzed=utcnow()
         )
         db.add(company)
         db.commit()
@@ -117,7 +118,7 @@ def save_earning(db: Session, company_id: int, data: dict) -> Earning:
         existing.revenue = data.get("revenue", existing.revenue)
         existing.net_income = data.get("net_income", existing.net_income)
         existing.operating_margin = data.get("operating_margin", existing.operating_margin)
-        existing.updated_at = datetime.utcnow()
+        existing.updated_at = utcnow()
         db.commit()
         db.refresh(existing)
         print(f"Updated earnings: {data.get('quarter')}")

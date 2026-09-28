@@ -6,12 +6,171 @@ import {
   ArrowDownRight,
   ArrowUpRight,
   ChevronDown,
+  Download,
   FileText,
+  LineChart,
+  Minus,
   Newspaper,
+  RefreshCw,
   ShieldAlert,
+  TrendingDown,
   TrendingUp,
+  Users,
 } from "lucide-react";
-import type { Report } from "../api/client";
+import { API_BASE, parseUtc, type ForecastSignal, type PeerSignal, type Report } from "../api/client";
+
+function DownloadMenu({ report }: { report: Report }) {
+  const [open, setOpen] = useState(false);
+  const downloadJson = () => {
+    const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${report.ticker}_report.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setOpen(false);
+  };
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[--color-bg-base]/70 border border-[--color-border-edge] text-slate-300 hover:text-slate-100 hover:border-indigo-500/50 transition-colors"
+      >
+        <Download size={14} /> Download <ChevronDown size={13} />
+      </button>
+      {open && (
+        <div className="absolute right-0 mt-1 z-20 w-44 rounded-lg border border-[--color-border-edge] bg-[--color-bg-card] shadow-xl overflow-hidden">
+          {report.report_id != null && (
+            <a
+              href={`${API_BASE}/reports/${report.report_id}/pdf`}
+              onClick={() => setOpen(false)}
+              className="block px-3 py-2 text-xs text-slate-200 hover:bg-indigo-500/15"
+            >
+              Download as PDF
+            </a>
+          )}
+          <button
+            type="button"
+            onClick={downloadJson}
+            className="block w-full text-left px-3 py-2 text-xs text-slate-400 hover:bg-indigo-500/15"
+          >
+            Download as JSON
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Compact currency formatter: 1.23e9 -> "$1.23B".
+function fmtMoney(n: number | undefined | null): string {
+  if (n === undefined || n === null || Number.isNaN(n)) return "—";
+  const abs = Math.abs(n);
+  if (abs >= 1e12) return `$${(n / 1e12).toFixed(2)}T`;
+  if (abs >= 1e9) return `$${(n / 1e9).toFixed(2)}B`;
+  if (abs >= 1e6) return `$${(n / 1e6).toFixed(1)}M`;
+  if (abs >= 1e3) return `$${(n / 1e3).toFixed(1)}K`;
+  return `$${n.toFixed(0)}`;
+}
+
+const TREND_THEME: Record<string, { color: string; Icon: typeof TrendingUp; arrow: string }> = {
+  up: { color: "text-emerald-300", Icon: TrendingUp, arrow: "↑" },
+  down: { color: "text-red-300", Icon: TrendingDown, arrow: "↓" },
+  flat: { color: "text-slate-300", Icon: Minus, arrow: "→" },
+};
+
+function RevenueForecastCard({ forecast }: { forecast: ForecastSignal }) {
+  if (forecast.status === "insufficient_data") {
+    return (
+      <div className="rounded-lg border border-[--color-border-edge] bg-[--color-bg-base]/60 px-3 py-2 text-xs text-slate-500">
+        <div className="flex items-center gap-2">
+          <LineChart size={13} />
+          <span className="uppercase tracking-wider text-[10px]">Revenue forecast</span>
+        </div>
+        <div className="mt-1">
+          Insufficient history ({forecast.quarters_available ?? "?"}/
+          {forecast.quarters_required ?? "?"} quarters)
+        </div>
+      </div>
+    );
+  }
+
+  const trend = TREND_THEME[forecast.trend_direction ?? "flat"] ?? TREND_THEME.flat;
+  const next = forecast.forecast_next_q;
+  const lo = forecast.forecast_low;
+  const hi = forecast.forecast_high;
+  const pm =
+    lo !== undefined && hi !== undefined ? Math.abs((hi - lo) / 2) : undefined;
+
+  return (
+    <div className="rounded-lg border border-indigo-500/25 bg-indigo-500/[0.05] px-3 py-2">
+      <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-slate-400">
+        <LineChart size={13} className="text-indigo-300" />
+        Revenue forecast (next Q)
+      </div>
+      <div className="mt-1 flex items-center gap-2">
+        <span className="text-sm font-semibold text-slate-100">{fmtMoney(next)}</span>
+        <span className={`flex items-center gap-0.5 text-sm font-bold ${trend.color}`}>
+          {trend.arrow}
+        </span>
+        {pm !== undefined && (
+          <span className="text-[11px] text-slate-500">± {fmtMoney(pm)}</span>
+        )}
+      </div>
+      <div className={`mt-0.5 text-[11px] ${trend.color}`}>
+        trend: {forecast.trend_direction ?? "flat"}
+      </div>
+    </div>
+  );
+}
+
+function PeerClusterCard({ peers }: { peers: PeerSignal }) {
+  const tickers = (peers.peer_tickers ?? []).slice(0, 5);
+  const sil = peers.silhouette;
+  const silPct = sil !== undefined ? Math.round(Math.max(0, Math.min(1, sil)) * 100) : null;
+
+  return (
+    <div className="rounded-lg border border-cyan-500/25 bg-cyan-500/[0.05] px-3 py-2">
+      <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-slate-400">
+        <Users size={13} className="text-cyan-300" />
+        Peer cluster
+      </div>
+      <div className="mt-1">
+        <span className="inline-block rounded-md bg-cyan-500/15 px-2 py-0.5 text-[11px] font-semibold text-cyan-200">
+          {peers.cluster_label ?? `cluster ${peers.cluster_id ?? "?"}`}
+        </span>
+      </div>
+      {tickers.length > 0 && (
+        <div className="mt-1.5 flex flex-wrap gap-1">
+          {tickers.map((t) => (
+            <span
+              key={t}
+              className="rounded-full bg-slate-500/15 px-2 py-0.5 text-[10px] font-mono text-slate-300"
+            >
+              {t}
+            </span>
+          ))}
+        </div>
+      )}
+      {silPct !== null && (
+        <div className="mt-2">
+          <div className="flex items-center justify-between text-[10px] text-slate-500">
+            <span>fit (silhouette)</span>
+            <span>{silPct}%</span>
+          </div>
+          <div className="mt-0.5 h-1 w-full rounded-full bg-[--color-bg-base]">
+            <div
+              className="h-1 rounded-full bg-gradient-to-r from-cyan-500 to-indigo-400 transition-all duration-500"
+              style={{ width: `${silPct}%` }}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 const RISK_THEME: Record<
   string,
@@ -283,13 +442,14 @@ function Collapsible({
 
 interface Props {
   report: Report;
+  onRefresh?: () => void;
 }
 
-export default function ReportCard({ report }: Props) {
+export default function ReportCard({ report, onRefresh }: Props) {
   const risk = (report.risk_level ?? "low") as keyof typeof RISK_THEME;
   const theme = RISK_THEME[risk] ?? RISK_THEME.low;
   const ts = report.generated_at
-    ? new Date(report.generated_at).toLocaleString()
+    ? parseUtc(report.generated_at).toLocaleString()
     : "—";
   const conf = report.confidence_score ?? 0;
   const bullPoints = splitIntoPoints(report.bull_case);
@@ -317,13 +477,30 @@ export default function ReportCard({ report }: Props) {
               {report.ticker}
             </span>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             <p className="text-xs text-slate-500">Generated {ts}</p>
             <DataQualityDot value={report.data_quality} />
+            {report.from_cache && (
+              <span className="flex items-center gap-1.5">
+                <span className="rounded-md bg-slate-500/15 border border-slate-500/30 px-2 py-0.5 text-[10px] text-slate-300">
+                  📋 Cached • {report.age_minutes ?? 0}m ago
+                </span>
+                {onRefresh && (
+                  <button
+                    type="button"
+                    onClick={onRefresh}
+                    className="flex items-center gap-1 text-[10px] text-cyan-300 hover:text-cyan-200"
+                  >
+                    <RefreshCw size={11} /> Refresh
+                  </button>
+                )}
+              </span>
+            )}
           </div>
         </div>
 
         <div className="flex items-center gap-5">
+          <DownloadMenu report={report} />
           <motion.span
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
@@ -340,11 +517,19 @@ export default function ReportCard({ report }: Props) {
       </div>
 
       {/* ML signals row */}
-      <div className="flex flex-wrap gap-2 mb-6">
+      <div className="flex flex-wrap gap-2 mb-3">
         {signals.map((s) => (
           <SignalChip key={s.label} signal={s} />
         ))}
       </div>
+
+      {/* Forecast + peer cards */}
+      {(report.forecast || report.peers) && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-6">
+          {report.forecast && <RevenueForecastCard forecast={report.forecast} />}
+          {report.peers && <PeerClusterCard peers={report.peers} />}
+        </div>
+      )}
 
       {/* Bull / Bear two-column (each collapsible) */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

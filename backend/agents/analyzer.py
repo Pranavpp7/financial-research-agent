@@ -446,8 +446,12 @@ class Analyzer:
                 db.close()
 
         logger.info("analysis_start", ticker=ticker, analysis=analysis_type)
+        # Acquire OUTSIDE the try: RateLimitExceeded must propagate to the
+        # Celery task (which retries with a countdown) — the generic except
+        # below would swallow it into an error dict and the retry path would
+        # never trigger.
+        get_rate_limiter().acquire("groq")
         try:
-            get_rate_limiter().acquire("groq")
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[

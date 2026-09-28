@@ -18,18 +18,20 @@ def get_company_info(cik: str) -> dict:
     CIK is the unique company identifier on SEC (e.g. '0000320193' for Apple)
     """
     url = f"{BASE_URL}/submissions/CIK{cik}.json"
-    
+
     try:
-        response = requests.get(url, headers=HEADERS)
+        response = requests.get(url, headers=HEADERS, timeout=30)
         response.raise_for_status()  # raises error if status != 200
         data = response.json()
-        
+
+        # `or [None]` also covers the key-present-but-empty-list case,
+        # which plain .get(key, [None]) would IndexError on.
         return {
             "name": data.get("name"),
             "cik": data.get("cik"),
             "sic_description": data.get("sicDescription"),
-            "ticker": data.get("tickers", [None])[0],
-            "exchange": data.get("exchanges", [None])[0],
+            "ticker": (data.get("tickers") or [None])[0],
+            "exchange": (data.get("exchanges") or [None])[0],
         }
     except requests.RequestException as e:
         print(f"Error fetching company info for CIK {cik}: {e}")
@@ -42,12 +44,12 @@ def get_recent_filings(cik: str, form_type: str = "10-K", limit: int = 5) -> lis
     form_type: '10-K' for annual, '10-Q' for quarterly
     """
     url = f"{BASE_URL}/submissions/CIK{cik}.json"
-    
+
     try:
-        response = requests.get(url, headers=HEADERS)
+        response = requests.get(url, headers=HEADERS, timeout=30)
         response.raise_for_status()
         data = response.json()
-        
+
         filings = data["filings"]["recent"]
         results = []
         
