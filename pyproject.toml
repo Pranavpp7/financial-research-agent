@@ -50,6 +50,8 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "imageio-ffmpeg>=0.6.0",
+    "playwright>=1.63.0",
     "pytest>=8.0",
 ]
 

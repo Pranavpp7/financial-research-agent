@@ -1,5 +1,7 @@
 # Financial Research Agent
 
+![Demo](docs/media/demo.gif)
+
 An LLM-orchestrated equity-research platform. Ask a natural-language question
 about a public company and it routes the question to the right mix of
 specialist analyses — SEC-filing semantic search, earnings-surprise
@@ -13,6 +15,17 @@ explainability, an async task queue, scheduled re-analysis, alerting,
 backtesting, and a React dashboard — all containerized.
 
 > ⚠️ For research and educational use only. Nothing here is financial advice.
+
+[Full demo video (MP4)](docs/media/demo.mp4)
+
+## Screenshots
+
+| | |
+|:--|:--|
+| ![Dashboard with finished NVDA report](docs/images/dashboard.png) | **Dashboard** — run an analysis and review the synthesized report alongside metrics and news sentiment. |
+| ![Report card close-up](docs/images/report.png) | **Report** — bull/bear cases, risk, confidence, and source-linked findings. |
+| ![Watchlist](docs/images/watchlist_filled.png) | **Watchlist** — track tickers for scheduled re-analysis and alerts. |
+| ![Backtests view](docs/images/backtest.png) | **Backtests** — illustrative hit-rate and return charts from historical reports. |
 
 ---
 
