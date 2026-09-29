@@ -24,7 +24,6 @@ backtesting, and a React dashboard — all containerized.
 |:--|:--|
 | ![Dashboard with finished analysis](docs/images/dashboard.png) | **Dashboard** — run an analysis and review the synthesized report alongside metrics and news sentiment. |
 | ![Report card close-up](docs/images/report.png) | **Report** — bull/bear cases, risk, confidence, and source-linked findings. |
-| ![Watchlist](docs/images/watchlist.png) | **Watchlist** — track tickers for scheduled re-analysis and alerts. |
 
 ---
 
