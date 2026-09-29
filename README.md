@@ -20,7 +20,7 @@ backtesting, and a React dashboard — all containerized.
 
 ```
                     ┌─────────────┐
-   question +       │  Supervisor │   one Groq/Llama-3.3-70B call in JSON mode
+   question +       │  Supervisor │   one Groq call (GROQ_MODEL) in JSON mode
    ticker  ───────► │  (router)   │   picks the minimal set of analyses
                     └──────┬──────┘
                            │  ["earnings", "sec", "news", "risk", "forecast"]
@@ -68,7 +68,7 @@ company.
 ## Tech stack
 
 **Backend** Python 3.13 · FastAPI · SQLAlchemy 2 · PostgreSQL + pgvector ·
-Redis · Celery · Groq (Llama 3.3 70B) · XGBoost · Prophet · scikit-learn ·
+Redis · Celery · Groq (model via `GROQ_MODEL`) · XGBoost · Prophet · scikit-learn ·
 SHAP · sentence-transformers · MLflow · Ragas · WeasyPrint (PDF export)
 
 **Frontend** React 19 · TypeScript · Vite · Tailwind · Recharts · Framer Motion

@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from groq import Groq
 
 from backend.agents.prompts import SYNTHESIS_PROMPT
+from backend.core.groq_config import get_groq_model
 from backend.core.rate_limiter import get_rate_limiter
 from backend.db.crud import save_report
 from backend.db.models import ReportCitation
@@ -18,9 +19,6 @@ from backend.db.session import SessionLocal
 load_dotenv()
 
 logger = structlog.get_logger(__name__)
-
-
-SYNTHESIZER_MODEL = "llama-3.3-70b-versatile"
 
 
 def _clamp_unit(value, default: float = 0.0) -> float:
@@ -32,12 +30,12 @@ def _clamp_unit(value, default: float = 0.0) -> float:
 
 
 class Synthesizer:
-    def __init__(self, model: str = SYNTHESIZER_MODEL):
+    def __init__(self, model: str | None = None):
         api_key = os.getenv("GROQ_API_KEY")
         if not api_key:
             raise RuntimeError("GROQ_API_KEY not set in .env")
         self.client = Groq(api_key=api_key)
-        self.model = model
+        self.model = model or get_groq_model()
 
     def synthesize(
         self, ticker: str, company_id: int, analyses: list[dict]

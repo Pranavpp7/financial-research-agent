@@ -89,6 +89,12 @@ def _check_groq_key() -> None:
         raise RuntimeError("GROQ_API_KEY format invalid (expected 'gsk_...' len > 20)")
 
 
+def _log_groq_model() -> None:
+    from backend.core.groq_config import get_groq_model
+
+    logger.info("groq_model", model=get_groq_model())
+
+
 def _hf_cache_dir() -> Path:
     return Path(
         os.getenv("HF_HOME")
@@ -134,6 +140,7 @@ def run_startup_checks() -> None:
     _check_postgres()       # hard
     _check_redis()          # hard
     _check_groq_key()       # hard
+    _log_groq_model()
     _check_schema_current()  # warn
     _check_model_cache()     # warn
     _check_mlflow_dir()      # warn

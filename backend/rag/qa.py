@@ -1,5 +1,5 @@
 """
-RAG Q&A: retrieve top-k chunks, format as context, ask Groq Llama 3.3 70B.
+RAG Q&A: retrieve top-k chunks, format as context, ask the configured Groq model.
 """
 import os
 
@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
 
+from backend.core.groq_config import get_groq_model
 from backend.core.rate_limiter import get_rate_limiter
 from backend.rag.retriever import search
 
@@ -22,8 +23,6 @@ SYSTEM_PROMPT = (
     "[brackets] (e.g. [AAPL 10-K chunk #42]). If the context does not contain "
     "the answer, say so explicitly -- do not speculate."
 )
-
-GROQ_MODEL = "llama-3.3-70b-versatile"
 
 
 def answer(question: str, k: int = 6, ticker: str | None = "AAPL") -> dict:
@@ -46,7 +45,7 @@ def answer(question: str, k: int = 6, ticker: str | None = "AAPL") -> dict:
         context_blocks.append(f"{header}\n{c['chunk_text']}")
     context = "\n\n".join(context_blocks)
 
-    llm = ChatGroq(model=GROQ_MODEL, temperature=0.0, api_key=api_key)
+    llm = ChatGroq(model=get_groq_model(), temperature=0.0, api_key=api_key)
     get_rate_limiter().acquire("groq")
     response = llm.invoke([
         SystemMessage(content=SYSTEM_PROMPT),
