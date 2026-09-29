@@ -95,7 +95,7 @@ export default function Watchlist({ refreshKey, onAnalyze }: Props) {
           onKeyDown={(e) => e.key === "Enter" && handleAdd()}
           placeholder="Add ticker"
           className="
-            flex-1 min-w-0 bg-[--color-bg-base]/70 border border-[--color-border-edge]
+            flex-1 min-w-0 bg-bg-base/70 border border-border-edge
             rounded-lg px-2.5 py-1.5 text-xs font-mono uppercase text-slate-100
             placeholder:normal-case placeholder:text-slate-600
             focus:outline-none focus:border-indigo-500/60
@@ -122,7 +122,7 @@ export default function Watchlist({ refreshKey, onAnalyze }: Props) {
           return (
             <div
               key={it.ticker}
-              className="rounded-lg border border-[--color-border-edge] bg-[--color-bg-base]/40 p-2.5"
+              className="rounded-lg border border-border-edge bg-bg-base/40 p-2.5"
             >
               <div className="flex items-center justify-between gap-2">
                 <span className="font-mono font-semibold text-slate-100">{it.ticker}</span>

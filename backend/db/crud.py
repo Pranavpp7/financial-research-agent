@@ -99,6 +99,65 @@ def get_filings(db: Session, company_id: int, form_type: str = None):
 
 # ─── EARNINGS ───────────────────────────────────────────────
 
+def _parse_report_date(date_str: str | None) -> datetime | None:
+    if not date_str:
+        return None
+    try:
+        return datetime.strptime(date_str[:10], "%Y-%m-%d")
+    except (TypeError, ValueError):
+        return None
+
+
+def delete_stale_earning_for_announcement(
+    db: Session,
+    company_id: int,
+    report_date: datetime,
+    quarter: str,
+) -> int:
+    """
+    Delete earnings rows for the same company and announcement date that are
+    keyed under a different quarter (stale announcement-quarter duplicates).
+    """
+    if report_date is None or not quarter:
+        return 0
+    return (
+        db.query(Earning)
+        .filter(
+            Earning.company_id == company_id,
+            Earning.report_date == report_date,
+            Earning.quarter != quarter,
+        )
+        .delete(synchronize_session="fetch")
+    )
+
+
+def apply_incoming_earnings(
+    db: Session, company_id: int, rows: list[dict]
+) -> int:
+    """
+    Upsert a batch of earnings rows.
+
+    For each row, remove same-announcement-date duplicates keyed under a
+    different quarter, then upsert on (company_id, quarter). An empty
+    incoming list skips deletes and writes entirely (preserves older
+    quarters outside the current fetch window).
+    """
+    if not rows:
+        return 0
+
+    saved = 0
+    for data in rows:
+        report_date = _parse_report_date(data.get("date"))
+        quarter = data.get("quarter")
+        if report_date is not None and quarter:
+            delete_stale_earning_for_announcement(
+                db, company_id, report_date, quarter
+            )
+        save_earning(db, company_id, data)
+        saved += 1
+    return saved
+
+
 def save_earning(db: Session, company_id: int, data: dict) -> Earning:
     """
     Save quarterly earnings data.
@@ -127,7 +186,7 @@ def save_earning(db: Session, company_id: int, data: dict) -> Earning:
     earning = Earning(
         company_id=company_id,
         quarter=data.get("quarter"),
-        report_date=datetime.strptime(data.get("date"), "%Y-%m-%d") if data.get("date") else None,
+        report_date=_parse_report_date(data.get("date")),
         eps_estimate=data.get("eps_estimate"),
         eps_actual=data.get("eps_actual"),
         surprise_pct=data.get("surprise_pct"),

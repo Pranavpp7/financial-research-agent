@@ -72,9 +72,9 @@ class Filing(Base):
 
 class FilingChunk(Base):
     """
-    SEC filings broken into 500-token chunks for RAG.
-    Each chunk gets embedded by Voyage AI and stored as a vector.
-    Vector search happens over this table via pgvector.
+    SEC filings broken into chunks for RAG.
+    Each chunk is embedded with local BAAI/bge-large-en-v1.5 (1024-dim)
+    and stored as a pgvector column.
     """
     __tablename__ = "filing_chunks"
 

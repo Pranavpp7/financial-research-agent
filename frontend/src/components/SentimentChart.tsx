@@ -22,7 +22,7 @@ function GlassTooltip({ active, payload }: any) {
   const row = payload[0].payload as SentimentRow;
   const score = row.sentiment_score ?? 0;
   return (
-    <div className="glass border border-[--color-border-edge] rounded-lg px-3 py-2 shadow-xl">
+    <div className="glass border border-border-edge rounded-lg px-3 py-2 shadow-xl">
       <div className="text-xs font-mono text-slate-400">{row.ticker}</div>
       {row.name && <div className="text-sm text-slate-100">{row.name}</div>}
       <div className="text-xs mt-1">
@@ -60,7 +60,7 @@ export default function SentimentChart() {
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5, delay: 0.1, ease: "easeOut" }}
-      className="glass border border-[--color-border-edge] rounded-2xl p-5"
+      className="glass border border-border-edge rounded-2xl p-5"
     >
       <div className="flex items-baseline justify-between mb-4">
         <h3 className="text-sm uppercase tracking-widest text-slate-500">
@@ -80,7 +80,7 @@ export default function SentimentChart() {
       {!loading && !error && data.length === 0 && (
         <p className="text-sm text-slate-500">
           No sentiment scores yet — run{" "}
-          <code className="px-1.5 py-0.5 rounded bg-[--color-bg-base] border border-[--color-border-edge] text-slate-400 text-[11px]">
+          <code className="px-1.5 py-0.5 rounded bg-bg-base border border-border-edge text-slate-400 text-[11px]">
             uv run --module backend.ml.sentiment_evaluator
           </code>
         </p>
