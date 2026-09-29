@@ -7,7 +7,7 @@ over-parameterizes on short quarterly series). It emits the same prediction
 schema the analyzer/frontend expect; `seasonality_strength` is reported as
 0.0 because this model has no seasonality component.
 
-For each company with >= 6 quarters of non-null revenue:
+For each company with >= 4 quarters of non-null revenue:
   1. Compute QoQ growth rates from the full series.
   2. Forecast next quarter = last revenue * (1 + median growth).
   3. +/- 1 stdev of growth rates for the interval.
@@ -37,7 +37,9 @@ logger = structlog.get_logger(__name__)
 # Forecasting needs at least this many quarters of revenue. Companies with
 # fewer get a cold-start sentinel ml_predictions row (status =
 # "insufficient_data") so the analyzer/frontend can explain the gap.
-MIN_QUARTERS = 6
+# Most tickers in this DB carry ~4–7 quarterly points; 4 is enough for a
+# median-QoQ estimate while still excluding near-empty series.
+MIN_QUARTERS = 4
 
 
 def _build_company_series(db, company: Company) -> pd.DataFrame | None:
