@@ -24,6 +24,7 @@ function toReport(item: ReportHistoryItem, ticker: string): Report {
     sources: null,
     forecast: null,
     peers: null,
+    ml_signals: null,
   };
 }
 

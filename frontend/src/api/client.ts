@@ -72,6 +72,13 @@ export interface PeerSignal {
   silhouette?: number;
 }
 
+export interface MlSignals {
+  anomaly?: { flagged?: boolean; score?: number | null; label?: string | null } | null;
+  beneish?: { label?: string | null; score?: number | null } | null;
+  earnings?: { beat?: boolean | null; confidence?: number | null; label?: string | null } | null;
+  sentiment?: { score?: number | null; label?: string | null } | null;
+}
+
 export interface Report {
   report_id?: number | null;
   ticker: string;
@@ -87,6 +94,7 @@ export interface Report {
   sources: unknown[] | null;
   forecast: ForecastSignal | null;
   peers: PeerSignal | null;
+  ml_signals?: MlSignals | null;
   from_cache?: boolean | null;
   age_minutes?: number | null;
 }
