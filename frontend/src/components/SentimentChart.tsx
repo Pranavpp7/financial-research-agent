@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Bar,
@@ -16,6 +16,8 @@ const COLOR_POS = "#22d3ee"; // cyan-400
 const COLOR_NEG = "#ef4444"; // red-500
 const COLOR_NEUTRAL = "#64748b"; // slate-500
 const NEUTRAL_BAND = 0.05;
+const TRIM_THRESHOLD = 20;
+const TRIM_EACH_END = 10;
 
 function GlassTooltip({ active, payload }: any) {
   if (!active || !payload || payload.length === 0) return null;
@@ -43,6 +45,28 @@ function GlassTooltip({ active, payload }: any) {
   );
 }
 
+/** Sort high→low; when n > 20 keep top 10 and bottom 10. */
+function selectChartRows(rows: SentimentRow[]): {
+  chart: SentimentRow[];
+  total: number;
+  trimmed: boolean;
+} {
+  const sorted = [...rows].sort(
+    (a, b) => (b.sentiment_score ?? 0) - (a.sentiment_score ?? 0)
+  );
+  if (sorted.length <= TRIM_THRESHOLD) {
+    return { chart: sorted, total: sorted.length, trimmed: false };
+  }
+  const top = sorted.slice(0, TRIM_EACH_END);
+  const bottom = sorted.slice(-TRIM_EACH_END);
+  // Preserve high→low overall: top block then bottom block.
+  return {
+    chart: [...top, ...bottom],
+    total: sorted.length,
+    trimmed: true,
+  };
+}
+
 export default function SentimentChart() {
   const [data, setData] = useState<SentimentRow[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -55,6 +79,11 @@ export default function SentimentChart() {
       .finally(() => setLoading(false));
   }, []);
 
+  const { chart, total, trimmed } = useMemo(
+    () => selectChartRows(data),
+    [data]
+  );
+
   return (
     <motion.section
       initial={{ opacity: 0, y: 16 }}
@@ -62,7 +91,7 @@ export default function SentimentChart() {
       transition={{ duration: 0.5, delay: 0.1, ease: "easeOut" }}
       className="glass border border-border-edge rounded-2xl p-5"
     >
-      <div className="flex items-baseline justify-between mb-4">
+      <div className="flex items-baseline justify-between mb-4 gap-3 flex-wrap">
         <h3 className="text-sm uppercase tracking-widest text-slate-500">
           News sentiment by company
         </h3>
@@ -86,46 +115,60 @@ export default function SentimentChart() {
         </p>
       )}
 
-      {!loading && data.length > 0 && (
-        <ResponsiveContainer width="100%" height={300}>
-          <BarChart data={data} margin={{ top: 10, right: 12, bottom: 0, left: -10 }}>
-            <XAxis
-              dataKey="ticker"
-              tick={{ fontSize: 11, fill: "#64748b", fontFamily: "monospace" }}
-              tickLine={{ stroke: "#1e1e2e" }}
-              axisLine={{ stroke: "#1e1e2e" }}
-            />
-            <YAxis
-              domain={[-1, 1]}
-              tickFormatter={(v) => v.toFixed(1)}
-              tick={{ fontSize: 11, fill: "#64748b" }}
-              tickLine={{ stroke: "#1e1e2e" }}
-              axisLine={{ stroke: "#1e1e2e" }}
-            />
-            <Tooltip
-              content={<GlassTooltip />}
-              cursor={{ fill: "rgba(99,102,241,0.06)" }}
-            />
-            <ReferenceLine y={0} stroke="#1e1e2e" strokeWidth={1} />
-            <Bar
-              dataKey="sentiment_score"
-              radius={[4, 4, 0, 0]}
-              animationDuration={900}
-              animationEasing="ease-out"
+      {!loading && chart.length > 0 && (
+        <>
+          {trimmed && (
+            <p className="text-[11px] text-slate-500 mb-3">
+              Top {TRIM_EACH_END} and bottom {TRIM_EACH_END} of {total} companies
+            </p>
+          )}
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart
+              data={chart}
+              margin={{ top: 10, right: 12, bottom: 28, left: -10 }}
             >
-              {data.map((row, i) => {
-                const score = row.sentiment_score ?? 0;
-                const color =
-                  Math.abs(score) < NEUTRAL_BAND
-                    ? COLOR_NEUTRAL
-                    : score > 0
-                    ? COLOR_POS
-                    : COLOR_NEG;
-                return <Cell key={i} fill={color} />;
-              })}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
+              <XAxis
+                dataKey="ticker"
+                interval={0}
+                angle={-35}
+                textAnchor="end"
+                height={50}
+                tick={{ fontSize: 10, fill: "#64748b", fontFamily: "monospace" }}
+                tickLine={{ stroke: "#1e1e2e" }}
+                axisLine={{ stroke: "#1e1e2e" }}
+              />
+              <YAxis
+                domain={[-1, 1]}
+                tickFormatter={(v) => v.toFixed(1)}
+                tick={{ fontSize: 11, fill: "#64748b" }}
+                tickLine={{ stroke: "#1e1e2e" }}
+                axisLine={{ stroke: "#1e1e2e" }}
+              />
+              <Tooltip
+                content={<GlassTooltip />}
+                cursor={{ fill: "rgba(99,102,241,0.06)" }}
+              />
+              <ReferenceLine y={0} stroke="#1e1e2e" strokeWidth={1} />
+              <Bar
+                dataKey="sentiment_score"
+                radius={[4, 4, 0, 0]}
+                animationDuration={900}
+                animationEasing="ease-out"
+              >
+                {chart.map((row, i) => {
+                  const score = row.sentiment_score ?? 0;
+                  const color =
+                    Math.abs(score) < NEUTRAL_BAND
+                      ? COLOR_NEUTRAL
+                      : score > 0
+                      ? COLOR_POS
+                      : COLOR_NEG;
+                  return <Cell key={`${row.ticker}-${i}`} fill={color} />;
+                })}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </>
       )}
     </motion.section>
   );

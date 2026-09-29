@@ -142,7 +142,7 @@ export default function SearchPanel({
               </>
             ) : (
               <span className="text-slate-600">
-                Press analyze to run supervisor → analyzers → synthesizer
+                Pulls filings, earnings and news, then writes a cited research report
               </span>
             )}
           </div>
