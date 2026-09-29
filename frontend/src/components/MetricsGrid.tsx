@@ -119,7 +119,7 @@ export default function MetricsGrid() {
       <MetricCard
         icon={<Cpu size={22} />}
         value={modelsRunning.toString()}
-        label="Models running"
+        label="ML models"
         tone="amber"
         delay={0.15}
       />

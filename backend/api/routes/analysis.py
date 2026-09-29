@@ -7,6 +7,14 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func
 
+from backend.api.ml_signals import (
+    MODEL_FORECAST,
+    MODEL_PEERS,
+    build_ml_signals,
+    latest_prediction,
+    normalize_forecast,
+    normalize_peers,
+)
 from backend.api.schemas.requests import AnalysisRequest
 from backend.api.schemas.responses import (
     ReportHistoryItem,
@@ -72,28 +80,20 @@ def _task_is_known(task_id: str) -> bool:
         return True
 
 
-def _latest_shap(db, company_id: int, model_name: str) -> dict | None:
-    """Latest shap_values dict for a model, or None. Cold-start sentinel
-    rows (status='insufficient_data') are returned as-is — the frontend
-    renders them as an explicit "insufficient history" card."""
-    pred = (
+def _company_ml_rows(db, company_id: int) -> list[MLPrediction]:
+    """Latest-first ml_predictions for a company (all models)."""
+    return (
         db.query(MLPrediction)
-        .filter(
-            MLPrediction.company_id == company_id,
-            MLPrediction.model_name == model_name,
-        )
+        .filter(MLPrediction.company_id == company_id)
         .order_by(MLPrediction.run_date.desc())
-        .first()
+        .all()
     )
-    if not pred or not isinstance(pred.shap_values, dict):
-        return None
-    return pred.shap_values
 
 
 def _build_report_response(report: Report, company: Company) -> ReportResponse:
     # key_findings live in report_citations (one row per finding), not on
     # the report row itself -- pull them back in insertion order. Forecast +
-    # peer signals come from the latest ml_predictions rows for the company.
+    # peer + badge signals come from the latest ml_predictions rows.
     db = SessionLocal()
     try:
         findings = [
@@ -106,8 +106,27 @@ def _build_report_response(report: Report, company: Company) -> ReportResponse:
             )
             if c.claim_text
         ]
-        forecast = _latest_shap(db, company.id, "revenue_forecaster")
-        peers = _latest_shap(db, company.id, "peer_clustering")
+        ml_rows = _company_ml_rows(db, company.id)
+        forecast_row = latest_prediction(ml_rows, MODEL_FORECAST)
+        peers_row = latest_prediction(ml_rows, MODEL_PEERS)
+        forecast = (
+            normalize_forecast(
+                forecast_row.shap_values if forecast_row else None,
+                prediction=forecast_row.prediction if forecast_row else None,
+            )
+            if forecast_row
+            else None
+        )
+        peers = (
+            normalize_peers(
+                peers_row.shap_values if peers_row else None,
+                prediction=peers_row.prediction if peers_row else None,
+                confidence=peers_row.confidence if peers_row else None,
+            )
+            if peers_row
+            else None
+        )
+        ml_signals = build_ml_signals(ml_rows)
     finally:
         db.close()
 
@@ -126,6 +145,7 @@ def _build_report_response(report: Report, company: Company) -> ReportResponse:
         sources=report.sources or [],
         forecast=forecast,
         peers=peers,
+        ml_signals=ml_signals,
     )
 
 
@@ -170,10 +190,24 @@ def get_task_status(task_id: str) -> TaskStatusResponse:
         )
 
     if state == "FAILURE":
+        # Celery stores the exception instance (or ExceptionInfo) on FAILURE.
+        raw = async_result.result
+        if raw is None:
+            error_msg = "task failed"
+        elif isinstance(raw, BaseException):
+            error_msg = str(raw)
+        elif hasattr(raw, "exception") and callable(raw.exception):
+            # ExceptionInfo from older celery backends
+            try:
+                error_msg = str(raw.exception())
+            except Exception:
+                error_msg = str(raw)
+        else:
+            error_msg = str(raw)
         return TaskStatusResponse(
             task_id=task_id,
             status="failed",
-            error=str(async_result.result) if async_result.result else "task failed",
+            error=error_msg or "task failed",
         )
 
     if state != "SUCCESS":

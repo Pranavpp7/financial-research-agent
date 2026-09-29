@@ -44,6 +44,7 @@ from ragas.metrics import (
 )
 
 from backend.agents.run_agent import analyze
+from backend.core.groq_config import get_groq_model
 from backend.db.models import EvalScore
 from backend.db.session import SessionLocal
 from backend.evaluation.benchmarks.sample_questions import QUESTIONS
@@ -56,7 +57,6 @@ os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
 load_dotenv()
 
 
-GROQ_MODEL = "llama-3.3-70b-versatile"
 EMBED_MODEL = "BAAI/bge-large-en-v1.5"
 RETRIEVAL_K = 6
 RESULTS_DIR = Path("eval_results")
@@ -164,8 +164,9 @@ def main(ticker_filter: str | None = None):
         print("  no ground truths -> skipping context_recall")
 
     # Ragas wants its own wrappers around langchain LLMs/embeddings.
+    groq_model = get_groq_model()
     judge_llm = LangchainLLMWrapper(ChatGroq(
-        model=GROQ_MODEL,
+        model=groq_model,
         temperature=0.0,
         api_key=api_key,
     ))
@@ -248,7 +249,7 @@ def main(ticker_filter: str | None = None):
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "git_commit": _git_commit_hash(),
-        "model": GROQ_MODEL,
+        "model": groq_model,
         "embedding_model": EMBED_MODEL,
         "retrieval_k": RETRIEVAL_K,
         "ticker_filter": ticker_filter,
@@ -264,7 +265,7 @@ def main(ticker_filter: str | None = None):
     print("Logging to MLflow...")
     mlflow.set_experiment("ragas_evaluation")
     with mlflow.start_run():
-        mlflow.log_param("model", GROQ_MODEL)
+        mlflow.log_param("model", groq_model)
         mlflow.log_param("embedding_model", EMBED_MODEL)
         mlflow.log_param("retrieval_k", RETRIEVAL_K)
         mlflow.log_param("num_questions", len(per_question))

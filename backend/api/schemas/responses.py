@@ -23,8 +23,11 @@ class ReportResponse(BaseModel):
     analyst_notes: str | None = None
     key_findings: list | None = None
     sources: list | None = None
-    forecast: dict | None = None   # revenue_forecaster shap_values
-    peers: dict | None = None      # peer_clustering shap_values
+    forecast: dict | None = None   # normalized revenue_forecaster payload
+    peers: dict | None = None      # normalized peer_clustering payload
+    # Structured badge inputs from latest ml_predictions (no LLM text).
+    # Keys: anomaly, beneish, earnings, sentiment — each a dict or null.
+    ml_signals: dict | None = None
     from_cache: bool | None = None  # True if served from the report cache
     age_minutes: int | None = None  # report age when served from cache
 

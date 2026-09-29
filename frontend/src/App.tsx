@@ -9,6 +9,7 @@ import SearchPanel from "./components/SearchPanel";
 import SentimentChart from "./components/SentimentChart";
 import Watchlist from "./components/Watchlist";
 import { pollTask, submitAnalysis, type Report } from "./api/client";
+import { formatAnalysisError } from "./lib/formatAnalysisError";
 
 const POLL_INTERVAL_MS = 3000;
 const SIDEBAR_KEY = "watchlist_open";
@@ -58,8 +59,8 @@ function NavBar({
             <span className="text-sm font-semibold tracking-wide text-slate-100">
               Financial Research Agent
             </span>
-            <span className="text-[10px] uppercase tracking-widest text-slate-500">
-              supervisor · analyzers · synthesizer
+            <span className="text-[10px] uppercase tracking-wider text-slate-500 hidden sm:block truncate max-w-[min(28rem,calc(100vw-16rem))]">
+              AI equity research from SEC filings, earnings and news
             </span>
           </div>
         </div>
@@ -148,7 +149,7 @@ export default function App() {
             });
             setError(null);
           } else {
-            setError(s.error || "task failed");
+            setError(formatAnalysisError(s.error || "task failed"));
           }
         } else if (s.status === "progress") {
           setProgress({ pct: s.pct ?? 0, message: s.message || "Working..." });
@@ -160,7 +161,7 @@ export default function App() {
         // over the raw "AxiosError: Request failed with status code 404".
         const detail = (e as { response?: { data?: { detail?: string } } })
           ?.response?.data?.detail;
-        setError(detail ?? String(e));
+        setError(formatAnalysisError(detail ?? String(e)));
       }
     }, POLL_INTERVAL_MS);
   };
@@ -187,7 +188,7 @@ export default function App() {
       startPolling(r.task_id);
     } catch (e) {
       setStatus("failed");
-      setError(String(e));
+      setError(formatAnalysisError(String(e)));
     }
   };
 

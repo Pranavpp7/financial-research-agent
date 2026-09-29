@@ -37,7 +37,7 @@ app = FastAPI(
     title="Financial Research Agent API",
     description=(
         "Multi-source financial analysis: SEC filings (RAG), earnings, news "
-        "sentiment, ML risk models, synthesized via Groq Llama 3.3 70B."
+        "sentiment, ML risk models, synthesized via a configurable Groq model."
     ),
     version="0.1.0",
     lifespan=lifespan,

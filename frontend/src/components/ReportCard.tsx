@@ -304,75 +304,89 @@ interface Signal {
   tone: SignalTone;
 }
 
-// Best-effort parse of ML signals from report.sources / findings text.
-// NOTE: this is a keyword heuristic; real ML fields get wired in a follow-up.
+// Structured ML badges — never regex LLM prose (negations like
+// "did not flag as anomalous" previously matched /flag|anomal/).
 function parseSignals(report: Report): Signal[] {
-  const hay = [
-    ...((report.sources ?? []) as unknown[]).map((s) =>
-      typeof s === "string" ? s : JSON.stringify(s)
-    ),
-    ...(report.key_findings ?? []),
-    report.bull_case ?? "",
-    report.bear_case ?? "",
-  ]
-    .join(" ")
-    .toLowerCase();
+  const ml = report.ml_signals ?? {};
 
+  const earningsLabel = ml.earnings?.label;
   const earnings: Signal = {
     icon: <TrendingUp size={13} />,
     label: "Earnings",
-    value: /\bbeat/.test(hay) ? "Beat" : /\bmiss/.test(hay) ? "Miss" : "—",
-    tone: /\bbeat/.test(hay) ? "good" : /\bmiss/.test(hay) ? "bad" : "unknown",
+    value:
+      earningsLabel === "beat"
+        ? "Beat"
+        : earningsLabel === "miss"
+          ? "Miss"
+          : "—",
+    tone:
+      earningsLabel === "beat"
+        ? "good"
+        : earningsLabel === "miss"
+          ? "bad"
+          : "unknown",
   };
+
+  const anomalyLabel = ml.anomaly?.label;
   const anomaly: Signal = {
     icon: <Activity size={13} />,
     label: "Anomaly",
-    value: /flag|anomal/.test(hay)
-      ? "Flagged"
-      : /\bclean\b|no anomal/.test(hay)
-        ? "Clean"
-        : "—",
-    tone: /flag|anomal/.test(hay)
-      ? "bad"
-      : /\bclean\b|no anomal/.test(hay)
-        ? "good"
-        : "unknown",
-  };
-  const beneish: Signal = {
-    icon: <ShieldAlert size={13} />,
-    label: "Beneish",
-    value: /manipulat/.test(hay)
-      ? "Manipulator"
-      : /grey|gray/.test(hay)
-        ? "Grey"
-        : /\bclean\b/.test(hay)
+    value:
+      anomalyLabel === "flagged"
+        ? "Flagged"
+        : anomalyLabel === "clean"
           ? "Clean"
           : "—",
-    tone: /manipulat/.test(hay)
-      ? "bad"
-      : /grey|gray/.test(hay)
-        ? "warn"
-        : /\bclean\b/.test(hay)
+    tone:
+      anomalyLabel === "flagged"
+        ? "bad"
+        : anomalyLabel === "clean"
           ? "good"
           : "unknown",
   };
+
+  const beneishLabel = ml.beneish?.label;
+  const beneish: Signal = {
+    icon: <ShieldAlert size={13} />,
+    label: "Beneish",
+    value:
+      beneishLabel === "manipulator"
+        ? "Manipulator"
+        : beneishLabel === "grey_area"
+          ? "Grey"
+          : beneishLabel === "clean"
+            ? "Clean"
+            : "—",
+    tone:
+      beneishLabel === "manipulator"
+        ? "bad"
+        : beneishLabel === "grey_area"
+          ? "warn"
+          : beneishLabel === "clean"
+            ? "good"
+            : "unknown",
+  };
+
+  const sentimentLabel = ml.sentiment?.label;
   const sentiment: Signal = {
     icon: <Newspaper size={13} />,
     label: "News",
-    value: /positive/.test(hay)
-      ? "Positive"
-      : /negative/.test(hay)
-        ? "Negative"
-        : /neutral/.test(hay)
-          ? "Neutral"
-          : "—",
-    tone: /positive/.test(hay)
-      ? "good"
-      : /negative/.test(hay)
-        ? "bad"
-        : /neutral/.test(hay)
-          ? "neutral"
-          : "unknown",
+    value:
+      sentimentLabel === "positive"
+        ? "Positive"
+        : sentimentLabel === "negative"
+          ? "Negative"
+          : sentimentLabel === "neutral"
+            ? "Neutral"
+            : "—",
+    tone:
+      sentimentLabel === "positive"
+        ? "good"
+        : sentimentLabel === "negative"
+          ? "bad"
+          : sentimentLabel === "neutral"
+            ? "neutral"
+            : "unknown",
   };
 
   return [earnings, anomaly, beneish, sentiment];

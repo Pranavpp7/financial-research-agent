@@ -13,6 +13,7 @@ import structlog
 from dotenv import load_dotenv
 from groq import Groq
 
+from backend.core.groq_config import get_groq_model, is_groq_auth_error
 from backend.core.rate_limiter import get_rate_limiter
 
 load_dotenv()
@@ -21,7 +22,6 @@ logger = structlog.get_logger(__name__)
 
 
 VALID_ANALYSES = ["earnings", "sec", "news", "risk", "forecast"]
-SUPERVISOR_MODEL = "llama-3.3-70b-versatile"
 
 
 SYSTEM = """\
@@ -45,12 +45,12 @@ include at least one analysis. Respond with ONLY a JSON object of the form
 
 
 class Supervisor:
-    def __init__(self, model: str = SUPERVISOR_MODEL):
+    def __init__(self, model: str | None = None):
         api_key = os.getenv("GROQ_API_KEY")
         if not api_key:
             raise RuntimeError("GROQ_API_KEY not set in .env")
         self.client = Groq(api_key=api_key)
-        self.model = model
+        self.model = model or get_groq_model()
 
     def decide(self, ticker: str, question: str) -> list[str]:
         # Acquire OUTSIDE the try — this was the one Groq call site with no
@@ -77,9 +77,17 @@ class Supervisor:
                 raise ValueError("supervisor returned no valid analyses")
             logger.info("supervisor_route", ticker=ticker, analyses=analyses)
             return analyses
-        except Exception as e:
+        except (json.JSONDecodeError, ValueError, TypeError, KeyError) as e:
+            # Soft routing failures only: bad/empty JSON or invalid route list.
             logger.warning(
                 "supervisor_fallback", ticker=ticker, error=str(e),
                 fallback=list(VALID_ANALYSES),
             )
             return list(VALID_ANALYSES)
+        except Exception as e:
+            # Auth and other hard Groq/client errors must not trigger run-all.
+            if is_groq_auth_error(e):
+                logger.error("supervisor_auth_failed", ticker=ticker, error=str(e))
+            else:
+                logger.error("supervisor_failed", ticker=ticker, error=str(e))
+            raise

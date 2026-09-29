@@ -12,6 +12,7 @@ import structlog
 from dotenv import load_dotenv
 from groq import Groq
 
+from backend.core.groq_config import get_groq_model, is_groq_auth_error
 from backend.core.rate_limiter import get_rate_limiter
 from backend.db.session import SessionLocal
 from backend.db.models import Earning, MLPrediction, NewsArticle
@@ -23,9 +24,6 @@ from backend.rag.retriever import search as rag_search
 load_dotenv()
 
 logger = structlog.get_logger(__name__)
-
-
-ANALYZER_MODEL = "llama-3.3-70b-versatile"
 
 PROMPTS = {
     "earnings": EARNINGS_PROMPT,
@@ -407,12 +405,12 @@ def _format_forecast_context(db, company_id: int) -> str:
 
 
 class Analyzer:
-    def __init__(self, model: str = ANALYZER_MODEL):
+    def __init__(self, model: str | None = None):
         api_key = os.getenv("GROQ_API_KEY")
         if not api_key:
             raise RuntimeError("GROQ_API_KEY not set in .env")
         self.client = Groq(api_key=api_key)
-        self.model = model
+        self.model = model or get_groq_model()
 
     def analyze(
         self,
@@ -467,5 +465,11 @@ class Analyzer:
             text = response.choices[0].message.content
             return {"type": analysis_type, "text": text, "context": context}
         except Exception as e:
+            if is_groq_auth_error(e):
+                logger.error(
+                    "analysis_auth_failed",
+                    ticker=ticker, analysis=analysis_type, error=str(e),
+                )
+                raise
             logger.error("analysis_llm_failed", ticker=ticker, analysis=analysis_type, error=str(e))
             return {"type": analysis_type, "text": "", "error": str(e)}

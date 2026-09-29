@@ -1,5 +1,7 @@
 # Financial Research Agent
 
+![Demo](docs/media/demo.gif)
+
 An LLM-orchestrated equity-research platform. Ask a natural-language question
 about a public company and it routes the question to the right mix of
 specialist analyses — SEC-filing semantic search, earnings-surprise
@@ -14,13 +16,23 @@ backtesting, and a React dashboard — all containerized.
 
 > ⚠️ For research and educational use only. Nothing here is financial advice.
 
+[Full demo video (MP4)](docs/media/demo.mp4)
+
+## Screenshots
+
+| | |
+|:--|:--|
+| ![Dashboard with finished analysis](docs/images/dashboard.png) | **Dashboard** — run an analysis and review the synthesized report alongside metrics and news sentiment. |
+| ![Report card close-up](docs/images/report.png) | **Report** — bull/bear cases, risk, confidence, and source-linked findings. |
+| ![Watchlist](docs/images/watchlist.png) | **Watchlist** — track tickers for scheduled re-analysis and alerts. |
+
 ---
 
 ## Architecture
 
 ```
                     ┌─────────────┐
-   question +       │  Supervisor │   one Groq/Llama-3.3-70B call in JSON mode
+   question +       │  Supervisor │   one Groq call (GROQ_MODEL) in JSON mode
    ticker  ───────► │  (router)   │   picks the minimal set of analyses
                     └──────┬──────┘
                            │  ["earnings", "sec", "news", "risk", "forecast"]
@@ -68,7 +80,7 @@ company.
 ## Tech stack
 
 **Backend** Python 3.13 · FastAPI · SQLAlchemy 2 · PostgreSQL + pgvector ·
-Redis · Celery · Groq (Llama 3.3 70B) · XGBoost · Prophet · scikit-learn ·
+Redis · Celery · Groq (model via `GROQ_MODEL`) · XGBoost · Prophet · scikit-learn ·
 SHAP · sentence-transformers · MLflow · Ragas · WeasyPrint (PDF export)
 
 **Frontend** React 19 · TypeScript · Vite · Tailwind · Recharts · Framer Motion
@@ -177,7 +189,7 @@ caveats:
   allows the call rather than blocking the pipeline — favouring availability
   over strict quota enforcement.
 - **Cold-start tickers.** Companies with too little history get an explicit
-  `insufficient_data` sentinel (earnings needs ≥4 quarters, revenue ≥6) rather
+  `insufficient_data` sentinel (earnings needs ≥4 quarters, revenue ≥4) rather
   than a fabricated prediction; run more ingestion to graduate them.
 
 ---
