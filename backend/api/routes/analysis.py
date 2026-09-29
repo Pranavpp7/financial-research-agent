@@ -170,10 +170,24 @@ def get_task_status(task_id: str) -> TaskStatusResponse:
         )
 
     if state == "FAILURE":
+        # Celery stores the exception instance (or ExceptionInfo) on FAILURE.
+        raw = async_result.result
+        if raw is None:
+            error_msg = "task failed"
+        elif isinstance(raw, BaseException):
+            error_msg = str(raw)
+        elif hasattr(raw, "exception") and callable(raw.exception):
+            # ExceptionInfo from older celery backends
+            try:
+                error_msg = str(raw.exception())
+            except Exception:
+                error_msg = str(raw)
+        else:
+            error_msg = str(raw)
         return TaskStatusResponse(
             task_id=task_id,
             status="failed",
-            error=str(async_result.result) if async_result.result else "task failed",
+            error=error_msg or "task failed",
         )
 
     if state != "SUCCESS":

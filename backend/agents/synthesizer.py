@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 from groq import Groq
 
 from backend.agents.prompts import SYNTHESIS_PROMPT
-from backend.core.groq_config import get_groq_model
+from backend.core.groq_config import get_groq_model, is_groq_auth_error
 from backend.core.rate_limiter import get_rate_limiter
 from backend.db.crud import save_report
 from backend.db.models import ReportCitation
@@ -56,6 +56,7 @@ class Synthesizer:
         # Celery task's retry handler; the generic except below would turn
         # it into a plain error report instead.
         get_rate_limiter().acquire("groq")
+        raw = ""
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
@@ -76,6 +77,9 @@ class Synthesizer:
             logger.error("synthesis_json_error", ticker=ticker, error=str(e))
             return {"error": f"synthesis returned invalid JSON: {e}", "raw": raw}
         except Exception as e:
+            if is_groq_auth_error(e):
+                logger.error("synthesis_auth_failed", ticker=ticker, error=str(e))
+                raise
             logger.error("synthesis_call_failed", ticker=ticker, error=str(e))
             return {"error": f"synthesis call failed: {e}"}
 

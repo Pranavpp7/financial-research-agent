@@ -12,7 +12,7 @@ import structlog
 from dotenv import load_dotenv
 from groq import Groq
 
-from backend.core.groq_config import get_groq_model
+from backend.core.groq_config import get_groq_model, is_groq_auth_error
 from backend.core.rate_limiter import get_rate_limiter
 from backend.db.session import SessionLocal
 from backend.db.models import Earning, MLPrediction, NewsArticle
@@ -465,5 +465,11 @@ class Analyzer:
             text = response.choices[0].message.content
             return {"type": analysis_type, "text": text, "context": context}
         except Exception as e:
+            if is_groq_auth_error(e):
+                logger.error(
+                    "analysis_auth_failed",
+                    ticker=ticker, analysis=analysis_type, error=str(e),
+                )
+                raise
             logger.error("analysis_llm_failed", ticker=ticker, analysis=analysis_type, error=str(e))
             return {"type": analysis_type, "text": "", "error": str(e)}

@@ -13,7 +13,7 @@ import structlog
 from dotenv import load_dotenv
 from groq import Groq
 
-from backend.core.groq_config import get_groq_model
+from backend.core.groq_config import get_groq_model, is_groq_auth_error
 from backend.core.rate_limiter import get_rate_limiter
 
 load_dotenv()
@@ -77,9 +77,17 @@ class Supervisor:
                 raise ValueError("supervisor returned no valid analyses")
             logger.info("supervisor_route", ticker=ticker, analyses=analyses)
             return analyses
-        except Exception as e:
+        except (json.JSONDecodeError, ValueError, TypeError, KeyError) as e:
+            # Soft routing failures only: bad/empty JSON or invalid route list.
             logger.warning(
                 "supervisor_fallback", ticker=ticker, error=str(e),
                 fallback=list(VALID_ANALYSES),
             )
             return list(VALID_ANALYSES)
+        except Exception as e:
+            # Auth and other hard Groq/client errors must not trigger run-all.
+            if is_groq_auth_error(e):
+                logger.error("supervisor_auth_failed", ticker=ticker, error=str(e))
+            else:
+                logger.error("supervisor_failed", ticker=ticker, error=str(e))
+            raise

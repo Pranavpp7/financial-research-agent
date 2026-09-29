@@ -5,12 +5,17 @@ import structlog
 
 from backend.agents.run_agent import analyze
 from backend.core.cache import find_fresh_report, make_cache_key, report_to_dict
+from backend.core.groq_config import is_groq_auth_error, is_groq_transient_error
 from backend.core.rate_limiter import RateLimitExceeded
 from backend.db.models import Report
 from backend.db.session import SessionLocal
 from backend.tasks.celery_app import celery_app
 
 logger = structlog.get_logger(__name__)
+
+
+class AnalysisPipelineError(RuntimeError):
+    """Raised when the agent returns an error payload; Celery marks FAILURE."""
 
 
 @celery_app.task(name="run_analysis", bind=True, max_retries=3)
@@ -26,9 +31,10 @@ def run_analysis_task(
     and question on the new report row.
 
     Streams stage progress via `self.update_state(state="PROGRESS", ...)`.
-    On RateLimitExceeded the task auto-retries up to max_retries, then
-    returns a structured rate-limit error. Other exceptions return
-    {"error": ...}.
+    On RateLimitExceeded (local Redis limiter) auto-retries, then returns a
+    structured rate-limit error dict (SUCCESS payload — see analysis.py).
+    Transient Groq errors (timeout / 5xx / connection / API 429) also retry.
+    Auth and other hard pipeline errors raise FAILURE and are never retried.
     """
     def progress(meta: dict) -> None:
         self.update_state(state="PROGRESS", meta=meta)
@@ -73,6 +79,14 @@ def run_analysis_task(
                     db.commit()
             finally:
                 db.close()
+        if result.get("error"):
+            logger.error(
+                "task_pipeline_error",
+                ticker=ticker,
+                task_id=self.request.id,
+                error=result["error"],
+            )
+            raise AnalysisPipelineError(result["error"])
         result["from_cache"] = False
         logger.info("task_complete", ticker=ticker, task_id=self.request.id,
                     report_id=result.get("report_id"), error=result.get("error"))
@@ -86,6 +100,9 @@ def run_analysis_task(
             # Re-queue after the limiter says a slot frees up.
             raise self.retry(countdown=e.retry_after_seconds, max_retries=3)
         except self.MaxRetriesExceededError:
+            # Keep SUCCESS + structured error so the API can forward
+            # service / retry_after_seconds to the UI countdown banner
+            # (FAILURE only carries a string exception message).
             return {
                 "error": "rate_limit_exceeded",
                 "service": e.service,
@@ -95,10 +112,30 @@ def run_analysis_task(
                     f"are exhausted. Try again in ~{e.retry_after_seconds}s."
                 ),
             }
+    except AnalysisPipelineError:
+        # Already logged; let Celery mark FAILURE (no retry).
+        raise
     except Exception as e:
+        # Auth errors must never be retried.
+        if is_groq_auth_error(e):
+            logger.error(
+                "task_auth_failed",
+                ticker=ticker, task_id=self.request.id, error=str(e),
+            )
+            raise
+        # Timeouts / connection / 5xx / Groq API 429 → retry with backoff.
+        if is_groq_transient_error(e):
+            logger.warning(
+                "task_transient_error",
+                ticker=ticker,
+                task_id=self.request.id,
+                error=str(e),
+                retries=self.request.retries,
+            )
+            raise self.retry(
+                exc=e,
+                countdown=2 ** self.request.retries,
+                max_retries=3,
+            )
         logger.error("task_failed", ticker=ticker, task_id=self.request.id, error=str(e))
-        return {
-            "error": str(e),
-            "ticker": ticker,
-            "question": question,
-        }
+        raise
