@@ -22,10 +22,9 @@ backtesting, and a React dashboard — all containerized.
 
 | | |
 |:--|:--|
-| ![Dashboard with finished NVDA report](docs/images/dashboard.png) | **Dashboard** — run an analysis and review the synthesized report alongside metrics and news sentiment. |
+| ![Dashboard with finished analysis](docs/images/dashboard.png) | **Dashboard** — run an analysis and review the synthesized report alongside metrics and news sentiment. |
 | ![Report card close-up](docs/images/report.png) | **Report** — bull/bear cases, risk, confidence, and source-linked findings. |
-| ![Watchlist](docs/images/watchlist_filled.png) | **Watchlist** — track tickers for scheduled re-analysis and alerts. |
-| ![Backtests view](docs/images/backtest.png) | **Backtests** — illustrative hit-rate and return charts from historical reports. |
+| ![Watchlist](docs/images/watchlist.png) | **Watchlist** — track tickers for scheduled re-analysis and alerts. |
 
 ---
 
@@ -190,7 +189,7 @@ caveats:
   allows the call rather than blocking the pipeline — favouring availability
   over strict quota enforcement.
 - **Cold-start tickers.** Companies with too little history get an explicit
-  `insufficient_data` sentinel (earnings needs ≥4 quarters, revenue ≥6) rather
+  `insufficient_data` sentinel (earnings needs ≥4 quarters, revenue ≥4) rather
   than a fabricated prediction; run more ingestion to graduate them.
 
 ---

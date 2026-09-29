@@ -51,6 +51,13 @@ def _shot(page, name: str, full_page: bool = True) -> Path:
     return path
 
 
+def _shot_locator(locator, name: str) -> Path:
+    path = IMAGES / f"{name}.png"
+    locator.screenshot(path=str(path))
+    print(f"[shot] {path.relative_to(ROOT)} (element)", flush=True)
+    return path
+
+
 def _hide_noise(page) -> None:
     page.add_style_tag(
         content="""
@@ -99,6 +106,11 @@ def capture() -> dict:
     _ensure_dirs()
     events: dict = {}
     video_path: Path | None = None
+    # Best-data ticker from diagnose: full ML suite + rich earnings/news.
+    demo_ticker = "ACN"
+    demo_question = (
+        "What is the earnings outlook and key accounting risk for Accenture?"
+    )
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, slow_mo=SLOW_MO_MS)
@@ -115,30 +127,27 @@ def capture() -> dict:
         _hide_noise(page)
         page.wait_for_timeout(1000)
         _log(events, "landing", t0)
-        _shot(page, "landing", full_page=False)
 
         # Seed watchlist before analysis so the sidebar looks populated
-        _add_watchlist(page, ["AAPL", "MSFT", "NVDA", "JPM"])
+        _add_watchlist(page, ["AAPL", "MSFT", demo_ticker, "JPM"])
         page.wait_for_timeout(800)
         _log(events, "watchlist_seeded", t0)
-        _shot(page, "watchlist")
+        _shot(page, "watchlist", full_page=False)
 
-        # NVDA analysis
         ticker = page.get_by_placeholder("Enter ticker — AAPL, MSFT, NVDA...")
         ticker.click()
         ticker.fill("")
-        ticker.type("NVDA", delay=TYPE_DELAY_MS)
+        ticker.type(demo_ticker, delay=TYPE_DELAY_MS)
         question = page.get_by_placeholder(
             "Optional question — defaults to a comprehensive analysis"
         )
-        question.fill("What is the earnings outlook and key risk for NVIDIA?")
+        question.fill(demo_question)
         page.wait_for_timeout(400)
 
         analyze_btn = page.get_by_role("main").get_by_role("button", name="Analyze →")
         analyze_btn.click()
         _log(events, "submit_click", t0)
 
-        # Progress UI (Analyzing... / progress bar)
         try:
             page.get_by_role("button", name="Analyzing...").wait_for(
                 state="visible", timeout=15_000
@@ -151,11 +160,29 @@ def capture() -> dict:
 
         _wait_report(page)
         _log(events, "report_rendered", t0)
-        page.wait_for_timeout(1200)
-        _shot(page, "report")
-        _shot(page, "dashboard", full_page=True)
+        page.wait_for_timeout(1500)
 
-        # Slow scroll through report
+        # Crop just the report card (glass section with Bull case).
+        report_card = page.locator("section").filter(has_text="Bull case").first
+        report_card.scroll_into_view_if_needed()
+        page.wait_for_timeout(400)
+        _shot_locator(report_card, "report")
+
+        # Top of dashboard: header, watchlist, stats, sentiment bars.
+        page.evaluate("window.scrollTo(0, 0)")
+        page.wait_for_timeout(800)
+        # Wait for sentiment bars if the chart has rendered
+        try:
+            page.locator(".recharts-bar-rectangle, .recharts-rectangle").first.wait_for(
+                state="visible", timeout=10_000
+            )
+            page.wait_for_timeout(500)
+        except PlaywrightTimeout:
+            print("[warn] sentiment bars not seen", flush=True)
+        _shot(page, "dashboard", full_page=False)
+
+        # Slow scroll through report (for video)
+        report_card.scroll_into_view_if_needed()
         for _ in range(6):
             page.mouse.wheel(0, 350)
             page.wait_for_timeout(450)
@@ -163,24 +190,19 @@ def capture() -> dict:
         page.mouse.wheel(0, -2000)
         page.wait_for_timeout(500)
 
-        # Watchlist pause (already populated)
-        page.get_by_role("button", name="Dashboard").click()
-        page.wait_for_timeout(1000)
-        _shot(page, "watchlist_filled")
-
-        # Backtest
-        _log(events, "backtest_start", t0)
-        _run_backtest(page)
-        page.wait_for_timeout(1500)
-        _log(events, "backtest_done", t0)
-        _shot(page, "backtest")
-
         page.wait_for_timeout(1500)
         _log(events, "end", t0)
 
         video_path = Path(page.video.path()) if page.video else None
         context.close()
         browser.close()
+
+    # Drop redundant / weak README assets from prior captures.
+    for stale in ("landing.png", "watchlist_filled.png", "backtest.png"):
+        path = IMAGES / stale
+        if path.exists():
+            path.unlink()
+            print(f"[rm] {path.relative_to(ROOT)}", flush=True)
 
     if video_path and video_path.exists():
         dest = RAW / "capture.webm"
