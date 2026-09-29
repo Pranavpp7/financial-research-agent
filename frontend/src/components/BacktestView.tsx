@@ -45,8 +45,10 @@ export default function BacktestView() {
   const [runId, setRunId] = useState<number | null>(null);
   const [run, setRun] = useState<Record<string, unknown> | null>(null);
   const [results, setResults] = useState<BacktestResultRow[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const [showLimits, setShowLimits] = useState(false);
   const pollRef = useRef<number | null>(null);
+  const trackedRunIdRef = useRef<number | null>(null);
 
   useEffect(() => () => stopPoll(), []);
 
@@ -55,28 +57,67 @@ export default function BacktestView() {
     pollRef.current = null;
   };
 
+  const finishRun = async (id: number) => {
+    stopPoll();
+    setRunning(false);
+    setRunId(id);
+    setRun(await getBacktest(id));
+    setResults(await getBacktestResults(id));
+  };
+
   const submit = async () => {
     setRunning(true);
     setRun(null);
     setResults([]);
-    await createBacktest({
-      name: name.trim() || `Backtest ${new Date().toISOString()}`,
-      min_confidence: minConfidence,
-    });
-    // Poll the run list for the newest run and watch it complete.
+    setError(null);
+    setRunId(null);
+    trackedRunIdRef.current = null;
     stopPoll();
-    pollRef.current = window.setInterval(async () => {
-      const runs = await listBacktests();
-      if (runs.length === 0) return;
-      const newest = runs[0];
-      setRunId(newest.id);
-      if (newest.status === "completed" || newest.status === "failed") {
-        stopPoll();
-        setRunning(false);
-        setRun(await getBacktest(newest.id));
-        setResults(await getBacktestResults(newest.id));
-      }
-    }, 3000);
+
+    try {
+      // Snapshot the newest existing run so we don't display a prior completed
+      // run while the new Celery task is still creating its BacktestRun row.
+      const existing = await listBacktests();
+      const maxExistingId = existing[0]?.id ?? 0;
+
+      await createBacktest({
+        name: name.trim() || `Backtest ${new Date().toISOString()}`,
+        min_confidence: minConfidence,
+      });
+
+      pollRef.current = window.setInterval(async () => {
+        try {
+          let id = trackedRunIdRef.current;
+          if (id === null) {
+            const runs = await listBacktests();
+            const created = runs.find((r) => r.id > maxExistingId);
+            if (!created) return;
+            id = created.id;
+            trackedRunIdRef.current = id;
+            setRunId(id);
+          }
+
+          const current = await getBacktest(id);
+          if (current.status === "completed" || current.status === "failed") {
+            await finishRun(id);
+            if (current.status === "failed") {
+              setError(
+                typeof current.error === "string" && current.error
+                  ? current.error
+                  : "Backtest failed.",
+              );
+            }
+          }
+        } catch (err) {
+          stopPoll();
+          setRunning(false);
+          setError(err instanceof Error ? err.message : "Failed to poll backtest status.");
+        }
+      }, 3000);
+    } catch (err) {
+      setRunning(false);
+      setError(err instanceof Error ? err.message : "Failed to start backtest.");
+    }
   };
 
   const summary = (run?.summary as Record<string, number | null> | undefined) ?? undefined;
@@ -115,13 +156,13 @@ export default function BacktestView() {
       </div>
 
       {/* Form */}
-      <div className="glass border border-[--color-border-edge] rounded-2xl p-6 flex flex-col gap-3">
+      <div className="glass border border-border-edge rounded-2xl p-6 flex flex-col gap-3">
         <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-300">Run a backtest</h2>
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="Backtest name"
-          className="bg-[--color-bg-base]/70 border border-[--color-border-edge] rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600"
+          className="bg-bg-base/70 border border-border-edge rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600"
         />
         <label className="text-xs text-slate-400">
           Min confidence: {minConfidence.toFixed(2)}
@@ -144,6 +185,11 @@ export default function BacktestView() {
             Running{runId ? ` (run #${runId})` : ""}... fetching prices via yfinance, this can take a while.
           </p>
         )}
+        {error && (
+          <p className="text-sm text-red-400 border border-red-500/20 bg-red-500/5 rounded-lg px-3 py-2">
+            {error}
+          </p>
+        )}
       </div>
 
       {/* Results */}
@@ -156,14 +202,14 @@ export default function BacktestView() {
               ["Bearish hit 30d", pct(summary.bearish_hit_rate_30d)],
               ["Avg bull 30d", pct(summary.avg_return_bullish_30d)],
             ].map(([label, val]) => (
-              <div key={label as string} className="glass border border-[--color-border-edge] rounded-xl p-4">
+              <div key={label as string} className="glass border border-border-edge rounded-xl p-4">
                 <div className="text-[10px] uppercase tracking-wider text-slate-500">{label}</div>
                 <div className="text-xl font-bold text-slate-100">{val}</div>
               </div>
             ))}
           </div>
 
-          <div className="glass border border-[--color-border-edge] rounded-2xl p-4">
+          <div className="glass border border-border-edge rounded-2xl p-4">
             <h3 className="text-xs uppercase tracking-wider text-slate-400 mb-3">Hit rate by ticker (30d)</h3>
             <ResponsiveContainer width="100%" height={220}>
               <BarChart data={tickerBars}>
@@ -176,7 +222,7 @@ export default function BacktestView() {
             </ResponsiveContainer>
           </div>
 
-          <div className="glass border border-[--color-border-edge] rounded-2xl p-4">
+          <div className="glass border border-border-edge rounded-2xl p-4">
             <h3 className="text-xs uppercase tracking-wider text-slate-400 mb-3">Confidence vs 30d return (%)</h3>
             <ResponsiveContainer width="100%" height={260}>
               <ScatterChart>
@@ -195,7 +241,7 @@ export default function BacktestView() {
             </ResponsiveContainer>
           </div>
 
-          <div className="glass border border-[--color-border-edge] rounded-2xl p-4 overflow-x-auto">
+          <div className="glass border border-border-edge rounded-2xl p-4 overflow-x-auto">
             <h3 className="text-xs uppercase tracking-wider text-slate-400 mb-3">Per-report results</h3>
             <table className="w-full text-xs">
               <thead>
@@ -211,7 +257,7 @@ export default function BacktestView() {
               </thead>
               <tbody>
                 {results.map((r, i) => (
-                  <tr key={i} className="border-t border-[--color-border-edge] text-slate-300">
+                  <tr key={i} className="border-t border-border-edge text-slate-300">
                     <td className="py-1 pr-3 font-mono">{r.ticker}</td>
                     <td className="py-1 pr-3">{r.report_date?.slice(0, 10)}</td>
                     <td className="py-1 pr-3" style={{ color: SIGNAL_COLOR[r.signal] }}>{r.signal}</td>

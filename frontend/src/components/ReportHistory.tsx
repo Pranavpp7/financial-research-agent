@@ -53,7 +53,7 @@ export default function ReportHistory({ ticker, refreshKey, onSelect }: Props) {
 
   if (items.length === 0) {
     return (
-      <div className="glass border border-[--color-border-edge] rounded-2xl p-6 text-sm text-slate-500">
+      <div className="glass border border-border-edge rounded-2xl p-6 text-sm text-slate-500">
         No previous reports for {ticker}. Run an analysis to get started.
       </div>
     );
@@ -73,12 +73,12 @@ export default function ReportHistory({ ticker, refreshKey, onSelect }: Props) {
     .filter((x): x is ReportHistoryItem => Boolean(x));
 
   return (
-    <div className="glass border border-[--color-border-edge] rounded-2xl p-6">
+    <div className="glass border border-border-edge rounded-2xl p-6">
       <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-300 mb-4">
         Report history — {ticker}
       </h3>
 
-      <div className="relative border-l border-[--color-border-edge] pl-4 flex flex-col gap-3">
+      <div className="relative border-l border-border-edge pl-4 flex flex-col gap-3">
         {items.map((it) => {
           const pill = it.risk_level
             ? RISK_PILL[it.risk_level]
@@ -88,7 +88,7 @@ export default function ReportHistory({ ticker, refreshKey, onSelect }: Props) {
           return (
             <div
               key={it.report_id}
-              className="relative rounded-lg border border-[--color-border-edge] bg-[--color-bg-base]/40 p-3"
+              className="relative rounded-lg border border-border-edge bg-bg-base/40 p-3"
             >
               <span className="absolute -left-[22px] top-4 h-2 w-2 rounded-full bg-indigo-400" />
               <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -136,7 +136,7 @@ export default function ReportHistory({ ticker, refreshKey, onSelect }: Props) {
           {compared.map((it) => (
             <div
               key={it.report_id}
-              className="rounded-lg border border-[--color-border-edge] bg-[--color-bg-base]/40 p-3"
+              className="rounded-lg border border-border-edge bg-bg-base/40 p-3"
             >
               <div className="text-[11px] text-slate-500 mb-2">
                 {it.created_at ? format(parseUtc(it.created_at), "PP p") : "—"}

@@ -36,12 +36,12 @@ function DownloadMenu({ report }: { report: Report }) {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[--color-bg-base]/70 border border-[--color-border-edge] text-slate-300 hover:text-slate-100 hover:border-indigo-500/50 transition-colors"
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-bg-base/70 border border-border-edge text-slate-300 hover:text-slate-100 hover:border-indigo-500/50 transition-colors"
       >
         <Download size={14} /> Download <ChevronDown size={13} />
       </button>
       {open && (
-        <div className="absolute right-0 mt-1 z-20 w-44 rounded-lg border border-[--color-border-edge] bg-[--color-bg-card] shadow-xl overflow-hidden">
+        <div className="absolute right-0 mt-1 z-20 w-44 rounded-lg border border-border-edge bg-bg-card shadow-xl overflow-hidden">
           {report.report_id != null && (
             <a
               href={`${API_BASE}/reports/${report.report_id}/pdf`}
@@ -84,7 +84,7 @@ const TREND_THEME: Record<string, { color: string; Icon: typeof TrendingUp; arro
 function RevenueForecastCard({ forecast }: { forecast: ForecastSignal }) {
   if (forecast.status === "insufficient_data") {
     return (
-      <div className="rounded-lg border border-[--color-border-edge] bg-[--color-bg-base]/60 px-3 py-2 text-xs text-slate-500">
+      <div className="rounded-lg border border-border-edge bg-bg-base/60 px-3 py-2 text-xs text-slate-500">
         <div className="flex items-center gap-2">
           <LineChart size={13} />
           <span className="uppercase tracking-wider text-[10px]">Revenue forecast</span>
@@ -160,7 +160,7 @@ function PeerClusterCard({ peers }: { peers: PeerSignal }) {
             <span>fit (silhouette)</span>
             <span>{silPct}%</span>
           </div>
-          <div className="mt-0.5 h-1 w-full rounded-full bg-[--color-bg-base]">
+          <div className="mt-0.5 h-1 w-full rounded-full bg-bg-base">
             <div
               className="h-1 rounded-full bg-gradient-to-r from-cyan-500 to-indigo-400 transition-all duration-500"
               style={{ width: `${silPct}%` }}
@@ -294,7 +294,7 @@ const SIGNAL_TONE: Record<SignalTone, string> = {
   bad: "border-red-500/30 bg-red-500/[0.06] text-red-300",
   warn: "border-amber-500/30 bg-amber-500/[0.06] text-amber-300",
   neutral: "border-slate-500/30 bg-slate-500/[0.06] text-slate-300",
-  unknown: "border-[--color-border-edge] bg-[--color-bg-base]/60 text-slate-500",
+  unknown: "border-border-edge bg-bg-base/60 text-slate-500",
 };
 
 interface Signal {
@@ -464,7 +464,7 @@ export default function ReportCard({ report, onRefresh }: Props) {
       initial={{ opacity: 0, y: 48 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.6, ease: "easeOut" }}
-      className="glass border border-[--color-border-edge] rounded-2xl p-6"
+      className="glass border border-border-edge rounded-2xl p-6"
     >
       {/* Header */}
       <div className="flex items-start justify-between gap-6 flex-wrap mb-6">
@@ -507,7 +507,7 @@ export default function ReportCard({ report, onRefresh }: Props) {
             transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
             className={`
               px-3 py-1.5 rounded-full text-[11px] font-bold tracking-widest uppercase
-              bg-[--color-bg-base]/80 ring-1 ${theme.ring} ${theme.text} ${theme.glow}
+              bg-bg-base/80 ring-1 ${theme.ring} ${theme.text} ${theme.glow}
             `}
           >
             {theme.label}
@@ -593,7 +593,7 @@ export default function ReportCard({ report, onRefresh }: Props) {
             {findings.map((f, i) => (
               <li
                 key={i}
-                className="flex gap-3 rounded-lg border-l-2 border-indigo-500/50 bg-[--color-bg-base]/40 px-3 py-2"
+                className="flex gap-3 rounded-lg border-l-2 border-indigo-500/50 bg-bg-base/40 px-3 py-2"
               >
                 <span className="font-mono text-xs text-indigo-300 mt-0.5">
                   {String(i + 1).padStart(2, "0")}
@@ -615,7 +615,7 @@ export default function ReportCard({ report, onRefresh }: Props) {
 
       {/* Sources accordion (collapsed by default) */}
       {sources.length > 0 && (
-        <div className="mt-5 pt-4 border-t border-[--color-border-edge]">
+        <div className="mt-5 pt-4 border-t border-border-edge">
           <Collapsible
             title={`Sources (${sources.length})`}
             icon={<FileText size={13} />}
@@ -626,7 +626,7 @@ export default function ReportCard({ report, onRefresh }: Props) {
               {sources.map((s, i) => (
                 <span
                   key={i}
-                  className="text-[11px] px-2 py-1 rounded-md bg-[--color-bg-base]/80 border border-[--color-border-edge] text-slate-400 font-mono"
+                  className="text-[11px] px-2 py-1 rounded-md bg-bg-base/80 border border-border-edge text-slate-400 font-mono"
                 >
                   {typeof s === "string" ? s : JSON.stringify(s)}
                 </span>

@@ -36,7 +36,7 @@ function NavBar({
       initial={{ opacity: 0, y: -10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4 }}
-      className="relative z-10 border-b border-[--color-border-edge] bg-[--color-bg-base]/60 backdrop-blur-md"
+      className="relative z-10 border-b border-border-edge bg-bg-base/60 backdrop-blur-md"
     >
       <div className="max-w-[1400px] mx-auto px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
@@ -213,7 +213,7 @@ export default function App() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -16 }}
               className="
-                w-64 shrink-0 glass border border-[--color-border-edge] rounded-2xl p-4
+                w-64 shrink-0 glass border border-border-edge rounded-2xl p-4
                 md:static fixed inset-y-0 left-0 z-20 md:z-auto overflow-y-auto
               "
             >

@@ -42,7 +42,7 @@ function MetricCard({ icon, value, label, trend, tone, delay = 0 }: CardProps) {
       <div
         className={`absolute inset-0 rounded-2xl bg-gradient-to-b ${TONE_GRADIENT[tone]} opacity-40`}
       />
-      <div className="relative m-[1px] rounded-2xl glass border border-[--color-border-edge] p-5 h-full">
+      <div className="relative m-[1px] rounded-2xl glass border border-border-edge p-5 h-full">
         <div className="flex items-start justify-between mb-4">
           <div className={`${TONE_ICON[tone]}`}>{icon}</div>
           {trend && (

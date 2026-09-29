@@ -1,5 +1,7 @@
 import os
+from calendar import monthrange
 from datetime import datetime
+from typing import Iterable, Optional
 
 import structlog
 from dotenv import load_dotenv
@@ -7,7 +9,7 @@ from backend.db.session import SessionLocal
 from backend.db.crud import (
     get_or_create_company,
     save_filing,
-    save_earning,
+    apply_incoming_earnings,
     save_news_article,
     get_company
 )
@@ -42,9 +44,9 @@ def safe_float(value):
         return None
 
 
-def date_to_quarter(date_str: str) -> str:
+def date_to_quarter(date_str: str) -> Optional[str]:
     """
-    Convert a date string to quarter format.
+    Convert a date string to calendar-quarter format.
     Example: '2026-04-30' → '2026-Q2'
     """
     if not date_str:
@@ -58,6 +60,78 @@ def date_to_quarter(date_str: str) -> str:
         # visible at debug level instead of vanishing silently.
         logger.debug("date_to_quarter failed to parse %r", date_str, exc_info=True)
         return None
+
+
+def quarter_period_end(quarter: str) -> Optional[datetime]:
+    """Return the calendar period-end date for a 'YYYY-Qn' label."""
+    if not quarter or "-Q" not in quarter:
+        return None
+    try:
+        year_s, q_s = quarter.split("-Q", 1)
+        year, q = int(year_s), int(q_s)
+        if q < 1 or q > 4:
+            return None
+        month = q * 3
+        day = monthrange(year, month)[1]
+        return datetime(year, month, day)
+    except (TypeError, ValueError):
+        return None
+
+
+def previous_calendar_quarter(quarter: str) -> Optional[str]:
+    """Shift a 'YYYY-Qn' label back one calendar quarter."""
+    end = quarter_period_end(quarter)
+    if end is None:
+        return None
+    q = (end.month - 1) // 3 + 1
+    year = end.year
+    if q == 1:
+        return f"{year - 1}-Q4"
+    return f"{year}-Q{q - 1}"
+
+
+def fiscal_quarter_for_announcement(
+    announcement_date: str,
+    available_quarters: Optional[Iterable[str]] = None,
+) -> Optional[str]:
+    """
+    Map an earnings *announcement* date to the fiscal quarter it reports.
+
+    yfinance earnings_dates use the announcement date, while income-statement
+    ratios are keyed by period-end. Announcements almost always fall in a
+    later calendar quarter than the period reported, so joining on
+    date_to_quarter(announcement) systematically misses.
+
+    Prefer the latest available period-end quarter that ended on or before
+    the announcement. Fall back to the previous calendar quarter.
+    """
+    if not announcement_date:
+        return None
+    try:
+        ann = datetime.strptime(announcement_date[:10], "%Y-%m-%d")
+    except (TypeError, ValueError):
+        logger.debug(
+            "fiscal_quarter_for_announcement failed to parse %r",
+            announcement_date,
+            exc_info=True,
+        )
+        return None
+
+    best_q: Optional[str] = None
+    best_end: Optional[datetime] = None
+    if available_quarters:
+        for q in available_quarters:
+            end = quarter_period_end(q)
+            if end is None:
+                continue
+            if end.date() <= ann.date() and (best_end is None or end > best_end):
+                best_end = end
+                best_q = q
+    if best_q is not None:
+        return best_q
+
+    ann_q = date_to_quarter(announcement_date)
+    return previous_calendar_quarter(ann_q) if ann_q else None
 
 
 def get_cik_for_ticker(ticker: str) -> str:
@@ -153,9 +227,13 @@ def run_ingestion_pipeline(ticker: str) -> dict:
         }
         print(f"Fetched ratios for {len(ratios_by_quarter)} quarters")
 
+        prepared_earnings: list[dict] = []
         for earning in earnings_history:
             date_str = earning.get("date", "")
-            quarter = date_to_quarter(date_str)
+            # Announcement date → fiscal period being reported (not announcement quarter).
+            quarter = fiscal_quarter_for_announcement(
+                date_str, available_quarters=ratios_by_quarter.keys()
+            )
 
             if not quarter:
                 continue
@@ -179,8 +257,14 @@ def run_ingestion_pipeline(ticker: str) -> dict:
                 earning_data["operating_margin"] = safe_float(matching_ratio.get("operating_margin"))
                 results["ratios_matched"] += 1
 
-            save_earning(db, company.id, earning_data)
-            results["earnings_saved"] += 1
+            prepared_earnings.append(earning_data)
+
+        # Empty fetch → no deletes (keeps older quarters outside the window).
+        # Non-empty → drop same-announcement-date rows keyed under a different
+        # quarter, then upsert on (company_id, quarter).
+        results["earnings_saved"] = apply_incoming_earnings(
+            db, company.id, prepared_earnings
+        )
 
         print(f"Saved {results['earnings_saved']} earnings records ({results['ratios_matched']} enriched with ratios)\n")
 

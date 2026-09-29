@@ -84,8 +84,8 @@ migrations
 - [uv](https://docs.astral.sh/uv/) (Python package manager)
 - Docker (for Postgres + Redis), or local Postgres 16 with the `pgvector`
   extension and a Redis server
-- API keys: [Groq](https://console.groq.com), [NewsAPI](https://newsapi.org),
-  [Voyage AI](https://voyageai.com)
+- API keys: [Groq](https://console.groq.com), [NewsAPI](https://newsapi.org)
+  (SEC filing embeddings use local `BAAI/bge-large-en-v1.5` — no Voyage key)
 
 ### 1. Configure environment
 ```bash

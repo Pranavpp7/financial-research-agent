@@ -84,7 +84,7 @@ export default function SearchPanel({
       initial={{ opacity: 0, y: -16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.45, ease: "easeOut" }}
-      className="glass border border-[--color-border-edge] rounded-2xl p-6 shadow-2xl shadow-indigo-500/5"
+      className="glass border border-border-edge rounded-2xl p-6 shadow-2xl shadow-indigo-500/5"
     >
       <form
         onSubmit={(e) => {
@@ -105,7 +105,7 @@ export default function SearchPanel({
             placeholder="Enter ticker — AAPL, MSFT, NVDA..."
             disabled={loading}
             className="
-              w-full bg-[--color-bg-base]/70 border border-[--color-border-edge]
+              w-full bg-bg-base/70 border border-border-edge
               rounded-xl pl-12 pr-4 py-4 font-mono text-lg uppercase tracking-wider
               text-slate-100 placeholder:text-slate-600 placeholder:normal-case placeholder:tracking-normal placeholder:font-sans
               focus:outline-none focus:border-indigo-500
@@ -122,7 +122,7 @@ export default function SearchPanel({
           placeholder="Optional question — defaults to a comprehensive analysis"
           disabled={loading}
           className="
-            w-full bg-[--color-bg-base]/70 border border-[--color-border-edge]
+            w-full bg-bg-base/70 border border-border-edge
             rounded-xl px-4 py-3 text-sm text-slate-200 placeholder:text-slate-600
             focus:outline-none focus:border-indigo-500/60
             focus:shadow-[0_0_0_3px_rgba(99,102,241,0.1)]
@@ -167,7 +167,7 @@ export default function SearchPanel({
 
         {loading && progress && (
           <div className="flex flex-col gap-1">
-            <div className="h-1.5 w-full rounded-full bg-[--color-bg-base] overflow-hidden">
+            <div className="h-1.5 w-full rounded-full bg-bg-base overflow-hidden">
               <div
                 className="h-1.5 rounded-full bg-gradient-to-r from-indigo-500 to-cyan-400 transition-all duration-500"
                 style={{ width: `${Math.max(0, Math.min(100, progress.pct))}%` }}
@@ -186,7 +186,10 @@ export default function SearchPanel({
             animate={{ opacity: 1 }}
             className="text-sm text-amber-300 border border-amber-500/30 bg-amber-500/10 rounded-lg px-3 py-2"
           >
-            ⏳ Rate limit reached for {rateLimit.service}. Retrying in {countdown}s...
+            ⏳ Rate limit reached for {rateLimit.service}.
+            {countdown > 0
+              ? ` Wait ${countdown}s, then click Analyze to try again.`
+              : " You can click Analyze to try again."}
           </motion.p>
         )}
 

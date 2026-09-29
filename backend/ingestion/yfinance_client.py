@@ -110,7 +110,7 @@ def safe_float(value):
         if value is None or str(value) == "nan":
             return None
         return float(value)
-    except:
+    except Exception:
         return None
 
 

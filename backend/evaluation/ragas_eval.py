@@ -16,9 +16,9 @@ Run:
   uv run --module backend.evaluation.ragas_eval
   uv run --module backend.evaluation.ragas_eval --ticker NVDA
 
-Note: the reports table has no `question` column, so the only honest way
-to evaluate is to control the question ourselves -- hence the closed-loop
-design where the eval owns both the run and the scoring.
+Note: even though `reports.question` exists, closed-loop eval still owns
+both the run and the scoring so the question, retrieved contexts, and
+answer stay tightly coupled for Ragas.
 """
 import argparse
 import json

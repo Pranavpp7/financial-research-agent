@@ -81,7 +81,7 @@ export default function AlertSettings({ ticker, onClose }: Props) {
       onClick={onClose}
     >
       <div
-        className="glass border border-[--color-border-edge] rounded-2xl p-6 w-full max-w-md max-h-[85vh] overflow-y-auto"
+        className="glass border border-border-edge rounded-2xl p-6 w-full max-w-md max-h-[85vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-4">
@@ -101,7 +101,7 @@ export default function AlertSettings({ ticker, onClose }: Props) {
             {subs.map((s) => (
               <div
                 key={s.id}
-                className="rounded-lg border border-[--color-border-edge] bg-[--color-bg-base]/40 p-2.5 text-xs"
+                className="rounded-lg border border-border-edge bg-bg-base/40 p-2.5 text-xs"
               >
                 <div className="flex items-center justify-between">
                   <span className="text-slate-200">
@@ -123,12 +123,12 @@ export default function AlertSettings({ ticker, onClose }: Props) {
         )}
 
         {/* add new */}
-        <div className="border-t border-[--color-border-edge] pt-4 flex flex-col gap-2">
+        <div className="border-t border-border-edge pt-4 flex flex-col gap-2">
           <div className="text-[10px] uppercase tracking-wider text-slate-500">Add subscription</div>
           <select
             value={channel}
             onChange={(e) => setChannel(e.target.value as "email" | "slack")}
-            className="bg-[--color-bg-base]/70 border border-[--color-border-edge] rounded-lg px-2.5 py-1.5 text-xs text-slate-100"
+            className="bg-bg-base/70 border border-border-edge rounded-lg px-2.5 py-1.5 text-xs text-slate-100"
           >
             <option value="email">Email</option>
             <option value="slack">Slack webhook</option>
@@ -137,7 +137,7 @@ export default function AlertSettings({ ticker, onClose }: Props) {
             value={destination}
             onChange={(e) => setDestination(e.target.value)}
             placeholder={channel === "email" ? "you@example.com" : "https://hooks.slack.com/..."}
-            className="bg-[--color-bg-base]/70 border border-[--color-border-edge] rounded-lg px-2.5 py-1.5 text-xs text-slate-100 placeholder:text-slate-600"
+            className="bg-bg-base/70 border border-border-edge rounded-lg px-2.5 py-1.5 text-xs text-slate-100 placeholder:text-slate-600"
           />
           <div className="flex flex-col gap-1">
             {TRIGGERS.map((t) => (
